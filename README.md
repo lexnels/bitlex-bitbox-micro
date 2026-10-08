@@ -91,12 +91,11 @@ The modded file is about 6.7 KB longer than the stock one (the mod's code is app
 
 [blackbox-mod](https://github.com/j3threejay/blackbox-mod) is for the 1010music blackbox, the micro's sister. Its
 sequencer features (chords, conditional trigs, sequencer fixes) are left out since the micro has no sequencer, and
-the ducker (duck mod sources) is left out by request.
+the ducker (duck mod sources) and the compressor models are left out by request.
 These were left out for now:
 
 | feature | why |
 |---|---|
-| Compressor models | The micro's master compressor already has the full set of controls (attack, release, threshold, ratio, knee, lookahead, auto makeup and release, Peak / RMS / Expander, wet/dry), which the blackbox's character models approximate. |
 | Room reverb | The micro's reverb engine is the same plate as the blackbox's, so Room's DSP would drop in, but its settings screen is a fixed set of knobs and the mod has no tested way to add a Type selector to it yet. |
 | Munchi delay | Same as Room: it needs new controls on the FX screen. |
 | CPU meter | The micro's screen drawing hasn't been mapped yet, so there is nowhere tested to draw it. |
