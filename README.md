@@ -90,7 +90,8 @@ The modded file is about 6.7 KB longer than the stock one (the mod's code is app
 ## Not ported from blackbox-mod
 
 [blackbox-mod](https://github.com/j3threejay/blackbox-mod) is for the 1010music blackbox, the micro's sister. Its
-sequencer features (chords, conditional trigs, sequencer fixes) are left out since the micro has no sequencer.
+sequencer features (chords, conditional trigs, sequencer fixes) are left out since the micro has no sequencer, and
+the ducker (duck mod sources) is left out by request.
 These were left out for now:
 
 | feature | why |
@@ -100,7 +101,6 @@ These were left out for now:
 | Munchi delay | Same as Room: it needs new controls on the FX screen. |
 | CPU meter | The micro's screen drawing hasn't been mapped yet, so there is nowhere tested to draw it. |
 | Solo, slicer knobs | Both change how the pads and knobs behave in the UI, which hasn't been mapped on the micro. |
-| Duck mod sources | The micro routes its CV inputs differently from the blackbox, and that path hasn't been traced yet. |
 | Saturation (input drive) | Its blackbox setting slot is a different setting (Loop Fade) on the micro. |
 
 ## Credits and licences
