@@ -120,7 +120,7 @@ def coeffs(knob, res):
 
 # --- patched call sites
 img = e.image
-for at, name in [(0x0806B34A, "interp_register"), (0x080AD960, "filter_voice_a"), (0x080B5CCC, "filter_voice_b"),
+for at, name in [(0x0806B34A, "mod_register"), (0x080AD960, "filter_voice_a"), (0x080B5CCC, "filter_voice_b"),
                  (0x080AEE92, "voice_read"), (0x080AF0D8, "voice_read"), (0x080AF19A, "voice_read"),
                  (0x080ADF00, "read_normal"), (0x080ADF24, "read_normal"), (0x080ADF48, "read_normal"),
                  (0x080ADD4C, "read_hq"), (0x080ADDD8, "read_hq"), (0x080ADDFC, "read_hq")]:

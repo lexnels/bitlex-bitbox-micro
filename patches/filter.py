@@ -1,11 +1,10 @@
 """Fidelity (Interp list: machine modes + crunch) and the 24 dB state-variable filter with drive (see src/filter.c).
-Apply together with `cave`."""
+Apply together with `mod` and `cave` (`mod` registers the Fidelity list)."""
 from thumb import hooker, symbols
 
 hook = hooker(symbols())
 
 PATCHES = [
-    hook(0x0806B34A, 0x08069E7C, "interp_register"),   # parameter 0xd2: Interp list 2 -> 14 entries, "Fidelity:"
     hook(0x080AD960, 0x080B8420, "filter_voice_a"),    # sample voices: per-voice filter
     hook(0x080B5CCC, 0x080B8420, "filter_voice_b"),    # slicer voices: per-voice filter
     # machine modes: park pad / position / rate on the way into the sample reader, then swap its two kernels

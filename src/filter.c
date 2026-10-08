@@ -17,6 +17,7 @@
  * Stock firmware treats the new Interp values as HighQ, so presets stay loadable there.
  */
 #include "fw.h"
+#include "mod.h"
 
 #pragma GCC optimize("O2", "no-tree-loop-distribute-patterns")   /* per-sample loops run for every voice */
 

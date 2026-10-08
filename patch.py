@@ -12,7 +12,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 STOCK = os.path.join(ROOT, "firmware", "MICRO-2.3.4.bin")
 STOCK_SHA256 = "54ecc3e5c09b9aed7ad8e2d9d1c9f8ee63e06a8351c857304c3ff21fcb9c4365"
 BASE = 0x08040000
-ALL = ["filter", "cave"]           # the full mod, in order; `python3 patch.py all` -> out/mod/MICRO.bin
+ALL = ["mod", "filter", "looper", "cave"]           # the full mod, in order; `python3 patch.py all` -> out/mod/MICRO.bin
 
 
 def build(names, stock=STOCK, verbose=True):
