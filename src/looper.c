@@ -21,7 +21,7 @@
  * Memory: four loops at a time, 4 MB of SDRAM each (10.9 s stereo: 4 bars down to 88 BPM), taken from the sample
  * memory at boot. Nothing is written to the SD card: the loop lives in RAM; the pad's sample file stays as recorded.
  *
- * Hooks: engine_block (in front of the engine's block process, see cpu.c) runs looper_block before the graph, which
+ * Hooks: engine_block (in front of the engine's block process, mod.c) runs looper_block before the graph, which
  * reads the loop for this block into a play buffer and then writes the input over it; loop_voice_render (in place of
  * the per-voice render FUN_080aec34) outputs that play buffer through the voice's own stage FUN_080ad870.
  */

@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""BitLex - 1010 bitbox micro modded firmware v0.1: https://github.com/lexnels/bitlex-bitbox-micro
+
+Turns the stock 1010music firmware file into the modded one. Needs Python 3, nothing else.
+
+  python3 bitlex-micro-v0.1-patcher.py <stock firmware file> [output file]
+
+The output defaults to modded/MICRO.bin next to this script (your stock file keeps its name). This file holds only the
+mod's changes, not 1010music's firmware: you need your own copy of the stock file (bitbox micro 2.3.4,
+SHA-256 54ecc3e5c09b9aed7ad8e2d9d1c9f8ee63e06a8351c857304c3ff21fcb9c4365).
+"""
+import base64, hashlib, os, struct, sys, zlib
+
+STOCK_SHA256 = "54ecc3e5c09b9aed7ad8e2d9d1c9f8ee63e06a8351c857304c3ff21fcb9c4365"
+MOD_SHA256 = "26350da8106505bd30e0f61f289123392ba3f6475b20a6f35553dc79507868da"
+PATCH = """
+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
+"""
+
+if len(sys.argv) < 2:
+    sys.exit(__doc__)
+data = bytearray(open(sys.argv[1], "rb").read())
+if hashlib.sha256(data).hexdigest() != STOCK_SHA256:
+    sys.exit("That isn't the stock firmware this mod was built for (SHA-256 mismatch). Nothing written.")
+blob, at = zlib.decompress(base64.b64decode("".join(PATCH.split()))), 0
+while at < len(blob):
+    ofs, n = struct.unpack_from("<II", blob, at)
+    data[ofs:ofs + n] = blob[at + 8:at + 8 + n]   # the last run starts at the end of the stock file and extends it
+    at += 8 + n
+assert hashlib.sha256(data).hexdigest() == MOD_SHA256, "patched result doesn't match; nothing written"
+# the stock file is also called MICRO.bin, so by default write into a "modded" folder next to this script
+out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "modded", "MICRO.bin")
+if os.path.exists(out) and os.path.samefile(out, sys.argv[1]):
+    sys.exit("The output would overwrite your stock file. Give a different output path. Nothing written.")
+os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+open(out, "wb").write(data)
+print("wrote", out, "- copy it to the root of the microSD card and install it like a 1010music firmware update.")

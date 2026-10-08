@@ -9,8 +9,6 @@
  *   0x0100  looper.c   looper state
  *   0x1000  looper.c   play buffers, 4 x (L 1 KB, R 1 KB)
  *   0x3000  looper.c   Resam source, L 1 KB, R 1 KB
- *   0x4000  cpu.c      CPU meter
- *   0x4100  comp.c     compressor models
  */
 
 void interp_register(void *table, int param, const char *label, const char *const *names, int count, const char *xml);
