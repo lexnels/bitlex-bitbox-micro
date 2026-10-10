@@ -130,8 +130,9 @@ img = e.image
 for at, name in [(0x0806B34A, "mod_register"), (0x0809418A, "engine_block"), (0x08089740, "mod_pad_store"),
                  (0x08089960, "mod_pad_store"), (0x080B25D6, "loop_voice_render")]:
     c.check(f"bl at {at:#x} -> {name}", bl_target(img, at) == e.sym[name] & ~1)
-c.check("pad settings pages end with Live Loop (0x17c)",
-        e.r16(0x080C7892) == 0x17C and e.r16(0x080C7AAE) == 0x17C and e.r16(0x080C7894) == 0)
+LL_PAGES = [0x080C6BEA, 0x080C6E06, 0x080C70BA, 0x080C72D6, 0x080C7892, 0x080C7AAE, 0x080C7CC8, 0x080C7FF6, 0x080C8214]
+c.check("all nine pad settings page variants end with Live Loop (0x17c) after Pad Note",
+        all(e.r16(a) == 0x17C and e.r16(a - 2) == 0xD6 and e.r16(a + 2) == 0 for a in LL_PAGES))
 
 # --- boot: no memory taken (the samples may already fill it); buffers come on first use
 e.w32(0x24000088, 0xC0000000)                         # SDRAM: bump allocator bottom, sample allocator top
