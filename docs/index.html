@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BitLex patcher</title>
+<meta name="description" content="Patch your own stock 1010music bitbox micro firmware with the custom mod, in your browser.">
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1b1f24; --muted: #5b6572; --line: #dde1e6;
+    --accent: #1f6feb; --accent-text: #ffffff; --ok: #1a7f37; --bad: #cf222e; --warn-bg: #fff8e5; --warn-line: #e3c45a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --card: #171b21; --text: #e6e9ed; --muted: #9aa4af; --line: #2a3038;
+      --accent: #4c8dff; --accent-text: #0b0d10; --ok: #3fb950; --bad: #ff6b6b; --warn-bg: #2a2410; --warn-line: #7a6420;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 40px 16px 64px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .warn { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 10px; padding: 12px 14px;
+          font-size: 0.92rem; margin-bottom: 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+  ol { padding-left: 1.2em; margin: 0 0 18px; }
+  li { margin: 4px 0; }
+  .drop { display: block; border: 2px dashed var(--line); border-radius: 12px; padding: 28px 16px; text-align: center;
+          cursor: pointer; transition: border-color .15s, background .15s; }
+  .drop:hover, .drop.over { border-color: var(--accent); }
+  .drop input { display: none; }
+  .drop strong { color: var(--accent); }
+  #status { min-height: 1.5em; margin: 16px 0 0; font-size: 0.95rem; overflow-wrap: anywhere; }
+  #status.ok { color: var(--ok); } #status.bad { color: var(--bad); }
+  #save { display: none; margin-top: 16px; width: 100%; padding: 12px; border: 0; border-radius: 10px;
+          background: var(--accent); color: var(--accent-text); font-size: 1rem; font-weight: 600; cursor: pointer; }
+  .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .gh { color: var(--text); flex: none; margin-top: 4px; opacity: .8; }
+  .gh:hover { opacity: 1; }
+  .adds { margin: 0 0 24px; }
+  .adds h2 { font-size: 1.05rem; margin: 0 0 6px; }
+  .adds ul { margin: 0 0 8px; padding-left: 1.2em; }
+  .adds p { margin: 0; }
+  .small { color: var(--muted); font-size: 0.85rem; margin-top: 24px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em; overflow-wrap: anywhere; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <h1>BitLex - 1010 bitbox micro modded firmware</h1>
+    <a class="gh" href="https://github.com/lexnels/bitlex-bitbox-micro" aria-label="Source on GitHub" title="Source on GitHub">
+      <svg viewBox="0 0 16 16" width="28" height="28" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+    </a>
+  </header>
+  <p class="sub">Custom firmware v0.1 for the 1010music bitbox micro, patched in your browser.</p>
+
+  <section class="adds">
+    <h2>What it adds</h2>
+    <ul>
+      <li><strong>Live Loop pads:</strong> a pad re-records itself every loop (1 bar, 2 bars, ...) in time with the
+        clock and keeps playing the last pass while it records, replacing it or overdubbing on top.</li>
+      <li><strong>Fidelity:</strong> the Interp setting gains vintage sampler modes (SP1200, SP-12, S950, MPC60,
+        SP Raw) and sample-rate crunch from 16k down to 2k.</li>
+      <li><strong>Filter:</strong> the pad filter becomes a 24 dB/oct state-variable filter that growls at high
+        resonance, in place of the stock 12 dB one.</li>
+    </ul>
+    <p><a href="https://github.com/lexnels/bitlex-bitbox-micro#readme">Full documentation</a></p>
+  </section>
+
+  <div class="warn"><strong>Install at your own risk.</strong> This is unofficial firmware, not made or supported by
+    1010music. Any custom firmware carries some risk of bricking your bitbox or losing projects. Keep your stock
+    firmware file and back up your SD card first.</div>
+
+  <div class="card">
+    <ol>
+      <li>Get the official bitbox micro firmware <strong>version 2.3.4</strong> (<code>MICRO.bin</code>) from 1010music.</li>
+      <li>Choose that file below. It stays on your computer: the patching happens in this page.</li>
+      <li>Save the modded <code>MICRO.bin</code>, copy it to the root of the microSD card and install it like a 1010music firmware update. If your browser saves it as <code>MICRO (1).bin</code>, rename it to <code>MICRO.bin</code> first.</li>
+    </ol>
+    <label class="drop" id="drop">
+      <input type="file" id="file">
+      <strong>Choose the stock firmware file</strong><br>or drop it here
+    </label>
+    <p id="status" role="status"></p>
+    <button id="save" type="button">Save MICRO.bin</button>
+  </div>
+
+  <div class="card">
+    <h2>Going back to stock firmware</h2>
+    <div class="warn"><strong>Back up your projects first</strong> (copy the whole microSD card to your computer).
+      Projects saved with the modded firmware won't work with the stock firmware, so after rolling back you can only
+      use projects saved before you installed the mod.</div>
+    <ol>
+      <li>Back up the microSD card to your computer.</li>
+      <li>Delete the projects you saved while running the modded firmware.</li>
+      <li>Delete the settings files on the card.</li>
+      <li>Copy your stock <code>MICRO.bin</code> (version 2.3.4) to the root of the card and install it like a 1010music firmware update.</li>
+    </ol>
+  </div>
+
+  <p class="small">Stock file SHA-256: <code>54ecc3e5c09b9aed7ad8e2d9d1c9f8ee63e06a8351c857304c3ff21fcb9c4365</code></p>
+</main>
+<script>
+const STOCK_SHA256 = "54ecc3e5c09b9aed7ad8e2d9d1c9f8ee63e06a8351c857304c3ff21fcb9c4365";
+const MOD_SHA256 = "26350da8106505bd30e0f61f289123392ba3f6475b20a6f35553dc79507868da";
+const PATCH = "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";
+
+const status = document.getElementById("status"), save = document.getElementById("save");
+const say = (text, cls) => { status.textContent = text; status.className = cls || ""; };
+let url = null;
+
+async function sha256(buf) {
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", buf));
+  return Array.from(h, b => b.toString(16).padStart(2, "0")).join("");
+}
+async function inflate(b64) {                       // zlib stream, as the Python patcher writes it
+  const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const stream = new Blob([bin]).stream().pipeThrough(new DecompressionStream("deflate"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function patch(file) {
+  save.style.display = "none";
+  if (url) { URL.revokeObjectURL(url); url = null; }
+  try {
+    say("Checking " + file.name + " ...");
+    const stockData = new Uint8Array(await file.arrayBuffer());
+    if (await sha256(stockData) !== STOCK_SHA256) {
+      say("That isn't the stock 2.3.4 firmware this mod is built for (its fingerprint doesn't match). Nothing was changed.", "bad");
+      return;
+    }
+    const blob = await inflate(PATCH), view = new DataView(blob.buffer);
+    let size = stockData.length;                     // the mod appends its code, so the result is longer
+    for (let at = 0; at < blob.length; at += 8 + view.getUint32(at + 4, true))
+      size = Math.max(size, view.getUint32(at, true) + view.getUint32(at + 4, true));
+    const out = new Uint8Array(size);
+    out.set(stockData);
+    for (let at = 0; at < blob.length; ) {
+      const ofs = view.getUint32(at, true), n = view.getUint32(at + 4, true);
+      out.set(blob.subarray(at + 8, at + 8 + n), ofs);
+      at += 8 + n;
+    }
+    if (await sha256(out) !== MOD_SHA256) {
+      say("Patching went wrong (the result doesn't match). Nothing to save.", "bad");
+      return;
+    }
+    url = URL.createObjectURL(new Blob([out], { type: "application/octet-stream" }));
+    say("Done: patched and checked.", "ok");
+    save.style.display = "block";
+  } catch (e) {
+    say("This browser couldn't patch the file (" + e.message + "). Try a current Chrome, Edge, Firefox or Safari.", "bad");
+  }
+}
+save.onclick = () => {
+  const a = document.createElement("a");
+  a.href = url; a.download = "MICRO.bin";
+  document.body.appendChild(a); a.click(); a.remove();
+};
+document.getElementById("file").onchange = e => { if (e.target.files[0]) patch(e.target.files[0]); };
+const drop = document.getElementById("drop");
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); if (e.dataTransfer.files[0]) patch(e.dataTransfer.files[0]); };
+</script>
+</body>
+</html>
