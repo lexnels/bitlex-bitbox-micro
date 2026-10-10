@@ -80,11 +80,16 @@ def bus(addr, l, r, n=N, silent=0, stereo=1):
     e.wr(addr, struct.pack("<iiIIBB", n, n, l, r, silent, stereo))
 
 
+def enc(x):
+    """A sample number as a level the 16-bit loop stores exactly (0.03 .. 0.46, so two overdubbed passes don't clip)."""
+    return float(x % 14000 + 1000) / 32768.0
+
+
 def set_input(block):
-    """Input sample k (absolute) = k + 1 (L), -(k + 1) (R): every sample tells where it came from."""
+    """Input sample k (absolute) = enc(k + 1) (L), -enc(k + 1) (R): every sample tells where it came from."""
     base = block * N
-    e.wr(IN_L, struct.pack(f"<{N}f", *[float(base + i + 1) for i in range(N)]))
-    e.wr(IN_R, struct.pack(f"<{N}f", *[-float(base + i + 1) for i in range(N)]))
+    e.wr(IN_L, struct.pack(f"<{N}f", *[enc(base + i + 1) for i in range(N)]))
+    e.wr(IN_R, struct.pack(f"<{N}f", *[-enc(base + i + 1) for i in range(N)]))
 
 
 def voice(addr, pad, row, col, wave=WAVE):
@@ -132,7 +137,7 @@ c.check("pad settings pages end with Live Loop (0x17c)",
 e.w32(0x24000088, 0xC0000000)                         # SDRAM: bump allocator bottom, sample allocator top
 e.w32(0x2400008C, 0xC4000000)
 e.call("looper_boot")
-c.check("boot takes no loop memory", [e.r32(0x38000040 + 4 * i, False) for i in range(4)] == [0] * 4)
+c.check("boot takes no loop memory", [e.r32(0x38000040 + 4 * i, False) for i in range(2)] == [0] * 2)
 bus(BUS0, IN_L, IN_R)
 bus(BUS3, RS_L, RS_R)
 rec_store(length=1)                                   # Length 1/4 (one beat): 24000 frames at 120 BPM
@@ -168,7 +173,7 @@ for k in range(1, blocks):
         if first:
             exp_l = exp_r = waveval[ph]
         else:
-            exp_l, exp_r = float(t - LEN + 1), -float(t - LEN + 1)
+            exp_l, exp_r = enc(t - LEN + 1), -enc(t - LEN + 1)
         if abs(l[i] - exp_l) > 1e-3 or abs(r[i] - exp_r) > 1e-3:
             if first:
                 ok_first = False
@@ -184,9 +189,9 @@ loop_l = e.r32(SLOT0 + 20, False)                     # slot 0: pad, mode, len, 
 transport(5 * N, anchor_ticks=480, anchor_samples=0)  # half a beat in at sample 0: song position = 12000 + now
 set_input(5)
 e.call("looper_block", CTX, N)
-first_in = e.rf(loop_l + (12000 + 5 * N) % LEN * 4)
+first_in = struct.unpack("<h", e.rd(loop_l + (12000 + 5 * N) % LEN * 2, 2))[0] / 32768.0
 c.check("loop position = (anchor ticks x samples per tick + now - anchor samples) mod length",
-        abs(first_in - (5 * N + 1)) < 1e-3, first_in)
+        abs(first_in - enc(5 * N + 1)) < 1e-6, first_in)
 
 # --- overdub: each pass adds
 clear_pads()
@@ -200,8 +205,8 @@ for k in range(0, 3 * LEN // N + 4):
     for i in range(N):
         results[k * N + i] = st[0][2][i] if st else None
 t = 2 * LEN + 1000
-c.check("Overdub: pass 3 plays pass 1 + pass 2 input", abs(results[t] - ((t - LEN + 1) + (t - 2 * LEN + 1))) < 1e-2,
-        (results[t], (t - LEN + 1) + (t - 2 * LEN + 1)))
+c.check("Overdub: pass 3 plays pass 1 + pass 2 input", abs(results[t] - (enc(t - LEN + 1) + enc(t - 2 * LEN + 1))) < 1e-6,
+        (results[t], enc(t - LEN + 1) + enc(t - 2 * LEN + 1)))
 
 # --- sources: In 1 on both sides, Resam = what bus 3 held a block earlier
 clear_pads()
@@ -210,19 +215,19 @@ pad_store(1, 2, 1)
 rec_store(length=1, source=1)
 mono_wave([0.0] * LEN)
 for k in range(0, LEN // N + 3):
-    e.wr(RS_L, struct.pack(f"<{N}f", *[7.0] * N))
-    e.wr(RS_R, struct.pack(f"<{N}f", *[8.0] * N))
+    e.wr(RS_L, struct.pack(f"<{N}f", *[0.25] * N))
+    e.wr(RS_R, struct.pack(f"<{N}f", *[0.375] * N))
     st, _ = block(k)[0]
 t = (LEN // N + 2) * N
-c.check("Rec Input In 1: input L recorded on both sides", abs(st[0][2][0] - (t - LEN + 1)) < 1e-3 and
-        abs(st[0][3][0] - (t - LEN + 1)) < 1e-3, (st[0][2][0], st[0][3][0]))
+c.check("Rec Input In 1: input L recorded on both sides", abs(st[0][2][0] - enc(t - LEN + 1)) < 1e-6 and
+        abs(st[0][3][0] - enc(t - LEN + 1)) < 1e-6, (st[0][2][0], st[0][3][0]))
 clear_pads()
 e.call("looper_boot")
 pad_store(1, 2, 1)
 rec_store(length=1, source=3)
 for k in range(0, LEN // N + 3):
     st, _ = block(k)[0]
-c.check("Rec Input Resam: records the master bus", st[0][2][5] == 7.0 and st[0][3][5] == 8.0, (st[0][2][5], st[0][3][5]))
+c.check("Rec Input Resam: records the master bus", st[0][2][5] == 0.25 and st[0][3][5] == 0.375, (st[0][2][5], st[0][3][5]))
 
 # --- gain: Rec Gain -6 dB halves the input
 clear_pads()
@@ -232,7 +237,7 @@ rec_store(length=1, gain=-6021)
 for k in range(0, LEN // N + 3):
     st, _ = block(k)[0]
 t = (LEN // N + 2) * N
-c.check("Rec Gain applies (-6 dB -> x0.5)", abs(st[0][2][0] / (t - LEN + 1) - 0.5) < 0.01, st[0][2][0] / (t - LEN + 1))
+c.check("Rec Gain applies (-6 dB -> x0.5)", abs(st[0][2][0] / enc(t - LEN + 1) - 0.5) < 0.01, st[0][2][0] / enc(t - LEN + 1))
 
 # --- per-pad recording settings (RecConfig Per Pad): the pad's own Length
 clear_pads()
@@ -263,7 +268,7 @@ pad_store(1, 2, 1, length=8)                          # 32 bars at 120 BPM = 64 
 rec_store(length=8)
 voice(VOICE, PAD, 1, 2)
 outs = block(0)
-c.check("a loop longer than 10.9 s: stock playback", outs[0][1] == [PAD])
+c.check("a loop longer than the loop memory (5.4 s): stock playback", outs[0][1] == [PAD])
 
 # --- engine_block: looper before, engine, looper after
 order = []
@@ -279,18 +284,19 @@ e.stub(0x08069E7C, lambda: seen.setdefault(e.arg(1), (e.cstr(e.arg(2)), e.r32(e.
                                                         e.cstr(e.r32(e.uc.reg_read(UC_ARM_REG_SP) + 4)))))
 e.call("looper_register", 0x24001000)
 c.check("Live Loop list: 0x17c 'Live Loop:' Off / Replace / Overdub, xml 'liveloop'",
-        seen.get(0x17C) == ("Loop 64M:", 3, ["Off", "Replace", "Overdub"], "liveloop"), seen.get(0x17C))
+        seen.get(0x17C) == ("Live Loop:", 3, ["Off", "Replace", "Overdub"], "liveloop"), seen.get(0x17C))
 
-# --- memory: a buffer only while 8 MB stay free for samples
+# --- memory: one block for all loops, only while 3 MB stay free for the firmware
 e.call("looper_boot")
-e.w32(0x2400008C, 0xC0000000 + (12 << 20) - 16)       # 12 MB - 16 bytes free: not enough for 4 MB + 8 MB
+e.w32(0x2400008C, 0xC0000000 + (4 << 20) - 16)        # just under 1 MB + 3 MB free: no loop memory
 clear_pads()
 pad_store(0, 0, 1)
 transport(0)
 e.call("looper_block", CTX, N)
-c.check("too little free memory: no loop buffer taken", e.r32(0x38000040, False) == 0)
-e.w32(0x2400008C, 0xC0000000 + (12 << 20))            # exactly 12 MB free: one buffer
+c.check("too little free memory: no loop memory taken", e.r32(0x38000040, False) == 0)
+e.w32(0x2400008C, 0xC0000000 + (7 << 20))             # 7 MB free (a real unit): 4 MB, 262144 frames per loop
 e.call("looper_block", CTX, N)
-c.check("enough free memory: a loop buffer on first use", e.r32(0x38000040, False) != 0)
+c.check("7 MB free: 4 MB taken, 5.4 s per loop", e.r32(0x38000040, False) != 0 and e.r32(0x38000044, False) == 262144,
+        e.r32(0x38000044, False))
 e.w32(0x2400008C, 0xC4000000)
 sys.exit(c.done())
