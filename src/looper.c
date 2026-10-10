@@ -19,7 +19,7 @@
  * or Length change restarts the loop from the pad's sample).
  *
  * Memory: four loops at a time, 4 MB of SDRAM each (10.9 s stereo: 4 bars down to 88 BPM), taken from the sample
- * memory at boot. Nothing is written to the SD card: the loop lives in RAM; the pad's sample file stays as recorded.
+ * memory the first time each is needed, and only while 8 MB stay free for samples (see take_buffer). Nothing is written to the SD card: the loop lives in RAM; the pad's sample file stays as recorded.
  *
  * Hooks: engine_block (in front of the engine's block process, mod.c) runs looper_block before the graph, which
  * reads the loop for this block into a play buffer and then writes the input over it; loop_voice_render (in place of
@@ -88,13 +88,38 @@ struct looper {
 #define RESAM_R   ((float *)(MOD_RAM + 0x3400u))
 #define MAX_BLOCK 256
 
-/* the four loop buffers, allocated once at boot (mod_boot) */
+/*
+ * The four loop buffers. They come from the SDRAM bump allocator (FUN_08042dc0, bottom up), the first time a pad needs
+ * one, and only while that leaves MARGIN free: the samples are loaded from the top down (FUN_08042e58) into the same
+ * memory, and both allocators hang the unit when they meet ("No more extended memory"). Reserving all four at boot did
+ * exactly that on a unit whose project filled the sample memory, so nothing is taken until Live Loop is used.
+ */
 #define BUFS ((float **)(MOD_RAM + 0x0040u))
+#define SDRAM_LOW  (*(volatile uint32_t *)0x24000088u)    /* bump allocator: next free byte, bottom up */
+#define SDRAM_HIGH (*(volatile uint32_t *)0x2400008cu)    /* sample allocator: lowest used byte, top down */
+#define MARGIN     (8u << 20)
 
+/* Free SDRAM between the two allocators, in bytes. */
+static uint32_t sdram_free(void)
+{
+    uint32_t lo = SDRAM_LOW, hi = SDRAM_HIGH;
+    return hi > lo ? hi - lo : 0;
+}
+
+static void label_update(void);
+
+static float *take_buffer(void)
+{
+    if (sdram_free() < SLOT_BYTES + MARGIN)
+        return 0;
+    return (float *)fw_sdram_alloc(SLOT_BYTES);
+}
+
+/* Boot: no memory is taken here (see above), only the bookkeeping is reset. */
 void looper_boot(void)
 {
     for (int i = 0; i < SLOTS; i++)
-        BUFS[i] = (float *)fw_sdram_alloc(SLOT_BYTES);
+        BUFS[i] = 0;
     LP->magic = 0;
 }
 
@@ -202,6 +227,8 @@ void looper_block(uint8_t *ctx, int n)
     if (LP->magic != LMAGIC)
         looper_init();
     LP->block++;
+    if ((LP->block & 511u) == 0)
+        label_update();                     /* about every 1.4 s */
     LP->frames = n;
     if (n <= 0 || n > MAX_BLOCK)
         return;
@@ -235,8 +262,18 @@ void looper_block(uint8_t *ctx, int n)
                     si = i;
                     break;
                 }
+            for (int i = 0; si < 0 && i < SLOTS; i++)
+                if (!LP->slot[i].l) {
+                    float *b = take_buffer();
+                    if (!b)
+                        break;                      /* not enough free memory: stock playback */
+                    BUFS[i] = b;
+                    LP->slot[i].l = b;
+                    LP->slot[i].r = b + SLOT_FRAMES;
+                    si = i;
+                }
             if (si < 0)
-                continue;                           /* all four loops in use */
+                continue;                           /* all four loops in use, or no memory for another */
             struct slot *s = &LP->slot[si];
             s->pad = (int8_t)p;
             s->len = 0;
@@ -351,7 +388,26 @@ void loop_voice_render(uint8_t *pad, uint8_t *voice, void *scratch, void *tmp, v
 }
 
 /* Registration: Live Loop list, id 0x17c, xml "liveloop" (called from mod_register). */
+/* Bring-up: the label shows the free sample memory, "Loop 23M:", so a unit's headroom can be read off the screen. */
+#define LABEL ((char *)(MOD_RAM + 0x3800u))
+
+static void label_update(void)
+{
+    unsigned mb = sdram_free() >> 20;
+    char *p = LABEL;
+    const char *a = "Loop ";
+    while (*a)
+        *p++ = *a++;
+    if (mb >= 10)
+        *p++ = (char)('0' + mb / 10 % 10);
+    *p++ = (char)('0' + mb % 10);
+    *p++ = 'M';
+    *p++ = ':';
+    *p = 0;
+}
+
 void looper_register(void *table)
 {
-    fw_register_list(table, P_LIVELOOP, "Live Loop:", liveloop_names, 3, "liveloop");
+    label_update();
+    fw_register_list(table, P_LIVELOOP, LABEL, liveloop_names, 3, "liveloop");
 }

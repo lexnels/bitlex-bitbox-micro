@@ -128,10 +128,11 @@ for at, name in [(0x0806B34A, "mod_register"), (0x0809418A, "engine_block"), (0x
 c.check("pad settings pages end with Live Loop (0x17c)",
         e.r16(0x080C7892) == 0x17C and e.r16(0x080C7AAE) == 0x17C and e.r16(0x080C7894) == 0)
 
-# --- boot: four 4 MB loop buffers from the SDRAM allocator
+# --- boot: no memory taken (the samples may already fill it); buffers come on first use
+e.w32(0x24000088, 0xC0000000)                         # SDRAM: bump allocator bottom, sample allocator top
+e.w32(0x2400008C, 0xC4000000)
 e.call("looper_boot")
-c.check("boot takes four 4 MB loop buffers", [e.r32(0x38000040 + 4 * i, False) for i in range(4)] ==
-        [0xC0000000 + i * 0x400000 for i in range(4)])
+c.check("boot takes no loop memory", [e.r32(0x38000040 + 4 * i, False) for i in range(4)] == [0] * 4)
 bus(BUS0, IN_L, IN_R)
 bus(BUS3, RS_L, RS_R)
 rec_store(length=1)                                   # Length 1/4 (one beat): 24000 frames at 120 BPM
@@ -278,5 +279,18 @@ e.stub(0x08069E7C, lambda: seen.setdefault(e.arg(1), (e.cstr(e.arg(2)), e.r32(e.
                                                         e.cstr(e.r32(e.uc.reg_read(UC_ARM_REG_SP) + 4)))))
 e.call("looper_register", 0x24001000)
 c.check("Live Loop list: 0x17c 'Live Loop:' Off / Replace / Overdub, xml 'liveloop'",
-        seen.get(0x17C) == ("Live Loop:", 3, ["Off", "Replace", "Overdub"], "liveloop"), seen.get(0x17C))
+        seen.get(0x17C) == ("Loop 64M:", 3, ["Off", "Replace", "Overdub"], "liveloop"), seen.get(0x17C))
+
+# --- memory: a buffer only while 8 MB stay free for samples
+e.call("looper_boot")
+e.w32(0x2400008C, 0xC0000000 + (12 << 20) - 16)       # 12 MB - 16 bytes free: not enough for 4 MB + 8 MB
+clear_pads()
+pad_store(0, 0, 1)
+transport(0)
+e.call("looper_block", CTX, N)
+c.check("too little free memory: no loop buffer taken", e.r32(0x38000040, False) == 0)
+e.w32(0x2400008C, 0xC0000000 + (12 << 20))            # exactly 12 MB free: one buffer
+e.call("looper_block", CTX, N)
+c.check("enough free memory: a loop buffer on first use", e.r32(0x38000040, False) != 0)
+e.w32(0x2400008C, 0xC4000000)
 sys.exit(c.done())
