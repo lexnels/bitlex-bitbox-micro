@@ -270,6 +270,23 @@ static inline int16_t to16(float x)
     return (int16_t)(v + (v >= 0.0f ? 0.5f : -0.5f));
 }
 
+/*
+ * Overdub: the loop so far comes back at OVERDUB_KEEP (-2.5 dB) under the new pass, so old layers fade out over about ten
+ * passes instead of piling up, and the sum goes through a soft limit (clean below half scale, rounding off towards
+ * full scale) instead of clipping.
+ */
+#define OVERDUB_KEEP 0.75f
+
+static inline float soft_limit(float x)
+{
+    float a = x < 0.0f ? -x : x;
+    if (a <= 0.5f)
+        return x;
+    float over = a - 0.5f;
+    float y = 0.5f + over / (1.0f + 2.0f * over);   /* -> 1.0 as a grows, slope 1 at 0.5 */
+    return x < 0.0f ? -y : y;
+}
+
 static void fetch_wave(void *wave, int pos, float *l, float *r, int n)
 {
     int have = 0;
@@ -424,8 +441,8 @@ void looper_block(uint8_t *ctx, int n)
             for (int i = 0; i < k; i++) {
                 float x = sl ? sl[done + i] * g : 0.0f, y = sr ? sr[done + i] * g : 0.0f;
                 if (mode == 2) {
-                    x += ol[i];
-                    y += or_[i];
+                    x = soft_limit(x + ol[i] * OVERDUB_KEEP);
+                    y = soft_limit(y + or_[i] * OVERDUB_KEEP);
                 }
                 bl[i] = to16(x);
                 br[i] = to16(y);

@@ -274,8 +274,15 @@ for k in range(0, 3 * LEN // N + 4):
     for i in range(N):
         results[k * N + i] = st[0][2][i] if st else None
 t = 2 * LEN + 1000
-c.check("Overdub: pass 3 plays pass 1 + pass 2 input", abs(results[t] - (enc(t - LEN + 1) + enc(t - 2 * LEN + 1))) < 1e-6,
-        (results[t], enc(t - LEN + 1) + enc(t - 2 * LEN + 1)))
+def soft(x):
+    a = abs(x)
+    y = a if a <= 0.5 else 0.5 + (a - 0.5) / (1 + 2 * (a - 0.5))
+    return math.copysign(y, x)
+
+
+want = soft(enc(t - LEN + 1) + 0.75 * enc(t - 2 * LEN + 1))
+c.check("Overdub: pass 3 plays pass 2 input + pass 1 at -2.5 dB, soft-limited", abs(results[t] - want) < 1e-4,
+        (results[t], want))
 
 # --- sources: In 1 on both sides, Resam = what bus 3 held a block earlier
 clear_pads()
