@@ -4,7 +4,7 @@ import os
 from thumb import ROOT
 
 STOCK_END = 0x080E3E90
-VERSION = b"2.3.4-L1"  # shown where stock shows 2.3.4; bump the number with each release
+VERSION = b"2.3.4-L2"  # shown where stock shows 2.3.4; bump the number with each release
 
 PATCHES = [
     (0x080C5770, b"2.3.4\0\0\0\0", VERSION + b"\0"),
