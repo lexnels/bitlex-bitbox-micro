@@ -192,6 +192,11 @@ k = blocks
 for _ in range(2):                                    # the voice render never runs: the hook isn't on its path
     transport(k * N); set_input(k); e.call("looper_block", CTX, N); e.call("looper_after", CTX, N); k += 1
 c.check("status when no voice render reaches the mod: 'Replace nohook'", status() == "Replace nohook", status())
+voice(VOICE2, PAD2, 0, 4)                             # only another pad's voice renders
+for _ in range(2):
+    block(k, render_pads=((PAD2, VOICE2),)); k += 1
+c.check("status when only other pads' voices render: 'Replace p000004:12' (id seen : Live Loop pad)",
+        status() == "Replace p000004:12", status())
 
 # --- the loop is locked to the song position, not to when the pad started
 SLOT0 = 0x38000100 + 32                               # struct looper: magic, block, frames, pad_slot[20]

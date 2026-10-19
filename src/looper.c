@@ -70,9 +70,11 @@ enum { ST_NONE, ST_TEMPO, ST_MEM, ST_FULL, ST_LEN, ST_PLAY, ST_REC, ST_NOHOOK, S
 static const char *const status_text[] = {"?", "tempo", "mem", "full", "len", "play", "REC",
                                           "nohook", "pad", "sync", "size", "voice"};
 #define NAMES  ((const char **)(MOD_RAM + 0x3800u))   /* Off, Replace .., Overdub .. */
-#define NAME_R ((char *)(MOD_RAM + 0x3810u))
-#define NAME_O ((char *)(MOD_RAM + 0x3820u))
+#define NAME_R ((char *)(MOD_RAM + 0x3840u))   /* 32 bytes each */
+#define NAME_O ((char *)(MOD_RAM + 0x3860u))
 #define STATUS (*(volatile uint8_t *)(MOD_RAM + 0x3830u))
+#define SEEN_ID    (*(volatile uint32_t *)(MOD_RAM + 0x3838u))   /* pad id (+0x18) of the last active voice rendered */
+#define WANT_PAD   (*(volatile uint8_t *)(MOD_RAM + 0x383cu))    /* the Live Loop pad the status is about */
 #define HOOK_CALLS (*(volatile uint32_t *)(MOD_RAM + 0x3834u))   /* loop_voice_render calls since the last block */
 
 static void name_set(char *dst, const char *mode, const char *st)
@@ -85,13 +87,33 @@ static void name_set(char *dst, const char *mode, const char *st)
     *dst = 0;
 }
 
+/* "pad" status: "p<id the render saw, hex>:<row><col of the Live Loop pad>", e.g. p000102:12 */
+static void pad_text(char *t)
+{
+    static const char hex[] = "0123456789abcdef";
+    uint32_t id = SEEN_ID;
+    *t++ = 'p';
+    for (int i = 20; i >= 0; i -= 4)
+        *t++ = hex[(id >> i) & 15];
+    *t++ = ':';
+    *t++ = (char)('0' + WANT_PAD / 5);
+    *t++ = (char)('0' + WANT_PAD % 5);
+    *t = 0;
+}
+
 static void status_show(unsigned st)
 {
-    if (st == STATUS && NAMES[1] == NAME_R)
+    if (st == STATUS && st != ST_PAD && NAMES[1] == NAME_R)
         return;
     STATUS = (uint8_t)st;
-    name_set(NAME_R, "Replace", status_text[st]);
-    name_set(NAME_O, "Overdub", status_text[st]);
+    char t[16];
+    const char *txt = status_text[st];
+    if (st == ST_PAD) {
+        pad_text(t);
+        txt = t;
+    }
+    name_set(NAME_R, "Replace", txt);
+    name_set(NAME_O, "Overdub", txt);
     NAMES[0] = "Off";
     NAMES[1] = NAME_R;
     NAMES[2] = NAME_O;
@@ -352,8 +374,11 @@ void looper_block(uint8_t *ctx, int n)
         }
         if (s->played == LP->block - 1)         /* did its voice play the loop last block? */
             STATUS_OF(ST_REC);
-        else
+        else {
+            if (st == ST_NONE)
+                WANT_PAD = (uint8_t)p;
             STATUS_OF(!hooked ? ST_NOHOOK : s->why ? s->why : ST_PAD);
+        }
         s->why = 0;
         if (len != s->len) {
             s->len = len;
@@ -430,6 +455,8 @@ void loop_voice_render(uint8_t *pad, uint8_t *voice, void *scratch, void *tmp, v
     int si = p >= 0 ? LP->pad_slot[p] : -1;
     struct slot *s = si >= 0 ? &LP->slot[si] : 0;
     HOOK_CALLS++;
+    if (voice[0])
+        SEEN_ID = pad_ptr_ok(pad) ? *(const uint32_t *)(pad + 0x18) : 0xeeeeeeu;
     if (s && s->len && (voice[0] || !s->why))     /* an idle voice of the pad doesn't hide an active one's reason */
         s->why = !voice[0] ? ST_VOICE : s->ready != LP->block ? ST_SYNC : fw_buf_frames(block) != LP->frames ? ST_SIZE : 0;
     if (!s || s->len == 0 || s->ready != LP->block || !voice[0]) {
