@@ -7,6 +7,10 @@ hook = hooker(symbols())
 
 PATCHES = [
     hook(0x080B25D6, 0x080AEC34, "loop_voice_render"),   # sample pads: per-voice render
+    hook(0x080B7DCE, 0x080B5AA8, "loop_clip_render"),    # clip and slicer pads: voice A, B, B
+    hook(0x080B7DEC, 0x080B5AA8, "loop_clip_render"),
+    hook(0x080B7FB0, 0x080B5AA8, "loop_clip_render"),
+    hook(0x080B5CB4, 0x080A3228, "loop_clip_chans"),     # in the clip render: the voice's channels
     # pad settings pages (Launch Mode, Output, ..., Pad Note): + Live Loop at the end. Every variant of the page, one per
     # pad type (3, 0x45) and play mode: they all belong to the two store types that carry Live Loop (mod_pad_store).
     (0x080C6BEA, struct.pack("<H", 0), struct.pack("<H", 0x17C)),

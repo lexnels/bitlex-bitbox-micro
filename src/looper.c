@@ -56,6 +56,10 @@ typedef float (*db_fn)(float db);
 #define fw_wave_read2   ((wave_read2_fn)FN(0x080a44c8))
 #define fw_buf_stereo   ((buf_stereo_fn)FN(0x080a32d4))
 #define fw_db_to_gain   ((db_fn)FN(0x0809f5b4))
+typedef void (*clip_render_fn)(uint8_t *pad, int a2, uint8_t *voice, int a4, uint8_t *flag, void *out, void *block);
+typedef void (*buf_limit_fn)(void *buf, int n);
+#define fw_clip_render  ((clip_render_fn)FN(0x080b5aa8))
+#define fw_buf_limit    ((buf_limit_fn)FN(0x080a31c8))        /* frames = n, if n fits */
 
 static const float length_quarters[11] = {4, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512};   /* Custom counts as 1 bar */
 /*
@@ -63,7 +67,7 @@ static const float length_quarters[11] = {4, 1, 2, 4, 8, 16, 32, 64, 128, 256, 5
  * reason it doesn't (the first Live Loop pad's): "?" no pad with Live Loop on seen yet, "tempo" no valid tempo, "mem"
  * no memory for loops, "full" four loops in use, "len" the Length is too long (or too short) for a loop, "play" the pad
  * isn't playing; when the pad plays its sample anyway, why its voice skipped the loop: "nohook" the voice render the
- * mod hooks didn't run at all, "pad" it ran but never for this pad, "sync" the loop wasn't ready that block, "size"
+ * mod hooks didn't run at all, "p012>12" it ran but never for this pad (bank, row, column it saw > the Live Loop pad's row, column), "sync" the loop wasn't ready that block, "size"
  * the voice block is a different size from the engine block, "voice" the voice was idle. The value names live in RAM so they can change; the screen shows the new text when it next redraws.
  */
 enum { ST_NONE, ST_TEMPO, ST_MEM, ST_FULL, ST_LEN, ST_PLAY, ST_REC, ST_NOHOOK, ST_PAD, ST_SYNC, ST_SIZE, ST_VOICE };
@@ -87,15 +91,15 @@ static void name_set(char *dst, const char *mode, const char *st)
     *dst = 0;
 }
 
-/* "pad" status: "p<id the render saw, hex>:<row><col of the Live Loop pad>", e.g. p000102:12 */
+/* "pad" status, short enough for the screen: "p<bank><row><col the render saw>><row><col of the Live Loop pad>" */
 static void pad_text(char *t)
 {
-    static const char hex[] = "0123456789abcdef";
     uint32_t id = SEEN_ID;
     *t++ = 'p';
-    for (int i = 20; i >= 0; i -= 4)
-        *t++ = hex[(id >> i) & 15];
-    *t++ = ':';
+    *t++ = (char)('0' + ((id >> 16) & 15));
+    *t++ = (char)('0' + ((id >> 8) & 15));
+    *t++ = (char)('0' + (id & 15));
+    *t++ = '>';
     *t++ = (char)('0' + WANT_PAD / 5);
     *t++ = (char)('0' + WANT_PAD % 5);
     *t = 0;
@@ -484,6 +488,57 @@ void loop_voice_render(uint8_t *pad, uint8_t *voice, void *scratch, void *tmp, v
         r[i] = first ? pr[i] : 0.0f;
     }
     fw_voice_stage(pad, voice, out, block);
+}
+
+/*
+ * Clip and slicer pads render through FUN_080b5aa8(pad, a2, voice, a4, flag, out, block) instead (bl at 0x080b7dce,
+ * 0x080b7dec, 0x080b7fb0: voice A at pad + 0x260, B at + 0x670 for crossfades). It fills block temp 1 from the sample,
+ * takes its channels (bl FUN_080a3228 at 0x080b5cb4), runs the envelope and filter on them and adds them to out. For a
+ * Live Loop pad the stock render runs as usual (so the voice starts, stops and crossfades as stock), and the loop
+ * takes the sample's place when it takes the channels: the play buffer for the pad's first active voice, silence for
+ * the other.
+ */
+#define CLIP_PARK (*(volatile int32_t *)(MOD_RAM + 0x3880u))   /* 1 + slot for the voice in render, -1 silence, 0 */
+
+void loop_clip_render(uint8_t *pad, int a2, uint8_t *voice, int a4, uint8_t *flag, void *out, void *block)
+{
+    int p = LP->magic == LMAGIC ? pad_index_of(pad) : -1;
+    int si = p >= 0 ? LP->pad_slot[p] : -1;
+    struct slot *s = si >= 0 ? &LP->slot[si] : 0;
+    HOOK_CALLS++;
+    if (voice[0])
+        SEEN_ID = pad_ptr_ok(pad) ? *(const uint32_t *)(pad + 0x18) : 0xeeeeeeu;
+    int n = fw_buf_frames(out);
+    if (s && s->len && (voice[0] || !s->why))
+        s->why = !voice[0] ? ST_VOICE : s->ready != LP->block ? ST_SYNC : n != LP->frames ? ST_SIZE : 0;
+    CLIP_PARK = 0;
+    if (s && s->len && s->ready == LP->block && voice[0] && !voice[0x148] && n == LP->frames) {
+        void *wave = *(void **)(pad + 0x24);
+        if (wave != s->wave) {                      /* new sample on the pad: the loop restarts from it */
+            s->wave = wave;
+            s->prefill = s->len;
+        }
+        CLIP_PARK = s->played != LP->block ? si + 1 : -1;
+        s->played = LP->block;
+    }
+    fw_clip_render(pad, a2, voice, a4, flag, out, block);
+    CLIP_PARK = 0;
+}
+
+int loop_clip_chans(void *buf, float **l, float **r)
+{
+    int park = CLIP_PARK;
+    if (!park)
+        return fw_buf_chans(buf, l, r);
+    int n = fw_buf_frames(buf);
+    fw_buf_stereo(buf, l, r);
+    fw_buf_limit(buf, n);
+    const float *pl = park > 0 ? PLAY_L(park - 1) : 0, *pr = park > 0 ? PLAY_R(park - 1) : 0;
+    for (int i = 0; i < n; i++) {
+        (*l)[i] = pl ? pl[i] : 0.0f;
+        (*r)[i] = pr ? pr[i] : 0.0f;
+    }
+    return 1;
 }
 
 /* Registration: Live Loop list, id 0x17c, xml "liveloop" (called from mod_register). */

@@ -132,7 +132,8 @@ def block(k, render_pads=((PAD, VOICE),), now0=0):
 # --- patched call sites and pages
 img = e.image
 for at, name in [(0x0806B34A, "mod_register"), (0x0809418A, "engine_block"), (0x08089740, "mod_pad_store"),
-                 (0x08089960, "mod_pad_store"), (0x080B25D6, "loop_voice_render")]:
+                 (0x08089960, "mod_pad_store"), (0x080B25D6, "loop_voice_render"), (0x080B7DCE, "loop_clip_render"),
+                 (0x080B7DEC, "loop_clip_render"), (0x080B7FB0, "loop_clip_render"), (0x080B5CB4, "loop_clip_chans")]:
     c.check(f"bl at {at:#x} -> {name}", bl_target(img, at) == e.sym[name] & ~1)
 LL_PAGES = [0x080C6BEA, 0x080C6E06, 0x080C70BA, 0x080C72D6, 0x080C7892, 0x080C7AAE, 0x080C7CC8, 0x080C7FF6, 0x080C8214]
 c.check("all nine pad settings page variants end with Live Loop (0x17c) after Pad Note",
@@ -188,15 +189,44 @@ for k in range(1, blocks):
 c.check("first pass plays the pad's sample at the loop position (mono sample on both sides)", ok_first, bad)
 c.check("after that, Replace plays exactly the input from one loop (24000 frames) earlier, L and R", ok_after, bad)
 c.check("status while it records and plays: 'Replace REC'", status() == "Replace REC", status())
+
+# --- clip and slicer pads: the stock clip render runs; the loop takes the sample's place when it takes the channels
+clip_park = []
+e.stub(0x080B5AA8, lambda: clip_park.append(e.r32(0x38003880, False)))
+kc = blocks
+transport(kc * N)
+set_input(kc)
+e.call("looper_block", CTX, N)
+e.w32(PAD + 0x24, WAVE)
+e.wr(OUT, struct.pack("<iiIIBB", N, N, OUT_L, OUT_R, 1, 0))
+e.w8(VOICE + 0x148, 0)
+voice(VOICE2, PAD, 1, 2)
+e.w8(VOICE2 + 0x148, 0)
+FLAG, TMP, TL, TR, PP = 0x2407A000, 0x2407A100, 0x2407A200, 0x2407A600, 0x2407AA00
+for v in (VOICE, VOICE2):
+    e.call("loop_clip_render", PAD, 0, v, 0, FLAG, stack_args=(OUT, BLOCK))
+c.check("clip pad: stock clip render runs for both voices, the first gets the loop, the second silence",
+        clip_park == [1, 0xFFFFFFFF], clip_park)
+e.wr(TMP, struct.pack("<iiIIBB", N, N, TL, TR, 0, 0))   # the render's temp, mono as the sample was
+e.w32(0x38003880, 1)
+e.call("loop_clip_chans", TMP, PP, PP + 4)
+e.w32(0x38003880, 0)
+cl = struct.unpack(f"<{N}f", e.rd(e.r32(PP, False), 4 * N))
+cr = struct.unpack(f"<{N}f", e.rd(e.r32(PP + 4, False), 4 * N))
+c.check("clip pad: the channels the render gets are the loop (input from one loop earlier), stereo",
+        all(abs(cl[i] - enc(kc * N + i - LEN + 1)) < 1e-3 and abs(cr[i] + enc(kc * N + i - LEN + 1)) < 1e-3
+            for i in range(N)) and e.r32(TMP + 4, False) == N, (cl[:2], cr[:2]))
+e.call("looper_after", CTX, N)
+blocks += 1
 k = blocks
-for _ in range(2):                                    # the voice render never runs: the hook isn't on its path
+for _ in range(3):                                    # the voice render never runs: the hook isn't on its path
     transport(k * N); set_input(k); e.call("looper_block", CTX, N); e.call("looper_after", CTX, N); k += 1
 c.check("status when no voice render reaches the mod: 'Replace nohook'", status() == "Replace nohook", status())
 voice(VOICE2, PAD2, 0, 4)                             # only another pad's voice renders
 for _ in range(2):
     block(k, render_pads=((PAD2, VOICE2),)); k += 1
-c.check("status when only other pads' voices render: 'Replace p000004:12' (id seen : Live Loop pad)",
-        status() == "Replace p000004:12", status())
+c.check("status when only other pads' voices render: 'Replace p004>12' (pad seen > Live Loop pad)",
+        status() == "Replace p004>12", status())
 
 # --- the loop is locked to the song position, not to when the pad started
 SLOT0 = 0x38000100 + 32                               # struct looper: magic, block, frames, pad_slot[20]
