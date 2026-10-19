@@ -67,14 +67,14 @@ static const float length_quarters[11] = {4, 1, 2, 4, 8, 16, 32, 64, 128, 256, 5
 /*
  * Status, shown in the setting's own value: "Replace REC" while the pad records and plays its loop, otherwise a short
  * reason it doesn't (the first Live Loop pad's): "?" no pad with Live Loop on seen yet, "tempo" no valid tempo, "mem"
- * no memory for loops, "full" four loops in use, "len" the Length is too long (or too short) for a loop, "play" the pad
+ * no memory for loops ("REC t": recording, but the transport isn't moving on steadily, so the loop runs by itself), "full" four loops in use, "len" the Length is too long (or too short) for a loop, "play" the pad
  * isn't playing; when the pad plays its sample anyway, why its voice skipped the loop: "nohook" the voice render the
  * mod hooks didn't run at all, "p012>12" it ran but never for this pad (bank, row, column it saw > the Live Loop pad's row, column), "sync" the loop wasn't ready that block, "size"
  * the voice block is a different size from the engine block, "voice" the voice was idle. The value names live in RAM so they can change; the screen shows the new text when it next redraws.
  */
-enum { ST_NONE, ST_TEMPO, ST_MEM, ST_FULL, ST_LEN, ST_PLAY, ST_REC, ST_NOHOOK, ST_PAD, ST_SYNC, ST_SIZE, ST_VOICE };
+enum { ST_NONE, ST_TEMPO, ST_MEM, ST_FULL, ST_LEN, ST_PLAY, ST_REC, ST_NOHOOK, ST_PAD, ST_SYNC, ST_SIZE, ST_VOICE, ST_REC_T };
 static const char *const status_text[] = {"?", "tempo", "mem", "full", "len", "play", "REC",
-                                          "nohook", "pad", "sync", "size", "voice"};
+                                          "nohook", "pad", "sync", "size", "voice", "REC t"};
 #define NAMES  ((const char **)(MOD_RAM + 0x3800u))   /* Off, Replace .., Overdub .. */
 #define NAME_R ((char *)(MOD_RAM + 0x3840u))   /* 32 bytes each */
 #define NAME_O ((char *)(MOD_RAM + 0x3860u))
@@ -136,6 +136,10 @@ struct slot {
     uint32_t played;              /* block number the play buffer was output in */
     int16_t *l, *r;               /* the loop (SDRAM), 16 bit */
     uint32_t ready;               /* block number the play buffer was filled for */
+    int32_t pos;                  /* where the loop goes on next block, -1 none: it runs on by itself */
+    int32_t tph;                  /* the transport's loop position last block, -1 none */
+    uint8_t jumps;                /* blocks the transport didn't move on by one block, decays */
+    uint8_t pad_[3];
 };
 
 struct looper {
@@ -215,6 +219,8 @@ static void looper_init(void)
         s->prefill = 0;
         s->wave = 0;
         s->played = 0;
+        s->pos = s->tph = -1;
+        s->jumps = 0;
         s->l = ARENA ? ARENA + (unsigned)i * 2u * CAP : 0;
         s->r = ARENA ? s->l + CAP : 0;
     }
@@ -396,7 +402,7 @@ void looper_block(uint8_t *ctx, int n)
             continue;
         }
         if (s->played == LP->block - 1)         /* did its voice play the loop last block? */
-            STATUS_OF(ST_REC);
+            STATUS_OF(s->jumps > 20 ? ST_REC_T : ST_REC);   /* "REC t": the transport isn't running steadily */
         else {
             if (st == ST_NONE)
                 WANT_PAD = (uint8_t)p;
@@ -406,6 +412,7 @@ void looper_block(uint8_t *ctx, int n)
         if (len != s->len) {
             s->len = len;
             s->prefill = len;
+            s->pos = s->tph = -1;
         }
         int source = fw_store_get(rs, P_RECINPUT);
         const float *sl = in_l, *sr = in_r;
@@ -419,7 +426,23 @@ void looper_block(uint8_t *ctx, int n)
         }
         float g = source == 3 ? 1.0f : gain;
         float *pl = PLAY_L(si), *pr = PLAY_R(si);
-        int32_t ph = loop_phase(transport, now, len, tempo);
+        /*
+         * The loop runs on by itself from block to block and follows the transport only when the transport itself runs
+         * steadily (moved on by exactly one block) and is somewhere else, so a stopped, stalled or jittery transport
+         * can't make the loop jump around inside itself.
+         */
+        int32_t tp = loop_phase(transport, now, len, tempo);
+        int32_t moved = s->tph < 0 ? -1 : tp - s->tph;
+        if (moved < 0 && s->tph >= 0)
+            moved += len;
+        int steady = moved == n;
+        if (!steady && s->tph >= 0 && s->jumps < 250)
+            s->jumps += 5;
+        else if (s->jumps)
+            s->jumps--;
+        s->tph = tp;
+        int32_t ph = s->pos >= 0 && s->pos < len && (!steady || s->pos == tp) ? s->pos : tp;
+        s->pos = ph + n < len ? ph + n : ph + n - len;
         int done = 0;
         while (done < n) {
             int k = n - done;

@@ -255,12 +255,24 @@ c.check("status when only other pads' voices render: 'Replace p004>12' (pad seen
 # --- the loop is locked to the song position, not to when the pad started
 SLOT0 = 0x38000100 + 32                               # struct looper: magic, block, frames, pad_slot[20]
 loop_l = e.r32(SLOT0 + 20, False)                     # slot 0: pad, mode, len, prefill, wave, played, l, r
-transport(5 * N, anchor_ticks=480, anchor_samples=0)  # half a beat in at sample 0: song position = 12000 + now
-set_input(5)
+for kk in (5, 6):                                     # the song position jumps; the loop follows once it runs on
+    transport(kk * N, anchor_ticks=480, anchor_samples=0)   # half a beat in at sample 0: song position = 12000 + now
+    set_input(kk)
+    e.call("looper_block", CTX, N)
+    e.call("looper_after", CTX, N)
+first_in = struct.unpack("<h", e.rd(loop_l + (12000 + 6 * N) % LEN * 2, 2))[0] / 32768.0
+c.check("loop position = (anchor ticks x samples per tick + now - anchor samples) mod length, once the transport runs on",
+        abs(first_in - enc(6 * N + 1)) < 1e-6, first_in)
+
+# --- a stalled transport (the same position twice): the loop runs on by itself, no repeated block
+SL0 = 0x38000100 + 32
+pos_before = e.r32(SL0 + 32, False)
+transport(6 * N, anchor_ticks=480, anchor_samples=0)
+set_input(7)
 e.call("looper_block", CTX, N)
-first_in = struct.unpack("<h", e.rd(loop_l + (12000 + 5 * N) % LEN * 2, 2))[0] / 32768.0
-c.check("loop position = (anchor ticks x samples per tick + now - anchor samples) mod length",
-        abs(first_in - enc(5 * N + 1)) < 1e-6, first_in)
+e.call("looper_after", CTX, N)
+c.check("stalled transport: the loop moves on one block anyway", e.r32(SL0 + 32, False) == (pos_before + N) % LEN,
+        (pos_before, e.r32(SL0 + 32, False)))
 
 # --- overdub: each pass adds
 clear_pads()
