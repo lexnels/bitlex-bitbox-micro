@@ -113,6 +113,10 @@ def render(pad=PAD, v=VOICE):
     e.call("loop_voice_render", pad, v, 0, 0, stack_args=(OUT, BLOCK))
 
 
+def status():
+    return e.cstr(e.r32(0x38003800 + 4, False))      # the Replace value name carries the status
+
+
 def block(k, render_pads=((PAD, VOICE),), now0=0):
     transport(now0 + k * N)
     set_input(k)
@@ -183,6 +187,7 @@ for k in range(1, blocks):
             bad = bad or (k, i, l[i], exp_l, r[i], exp_r)
 c.check("first pass plays the pad's sample at the loop position (mono sample on both sides)", ok_first, bad)
 c.check("after that, Replace plays exactly the input from one loop (24000 frames) earlier, L and R", ok_after, bad)
+c.check("status while it records and plays: 'Replace REC'", status() == "Replace REC", status())
 
 # --- the loop is locked to the song position, not to when the pad started
 SLOT0 = 0x38000100 + 32                               # struct looper: magic, block, frames, pad_slot[20]
@@ -270,6 +275,8 @@ rec_store(length=8)
 voice(VOICE, PAD, 1, 2)
 outs = block(0)
 c.check("a loop longer than the loop memory (5.4 s): stock playback", outs[0][1] == [PAD])
+outs = block(1)
+c.check("status for a loop too long: 'Replace len'", status() == "Replace len", status())
 
 # --- engine_block: looper before, engine, looper after
 order = []
@@ -285,7 +292,7 @@ e.stub(0x08069E7C, lambda: seen.setdefault(e.arg(1), (e.cstr(e.arg(2)), e.r32(e.
                                                         e.cstr(e.r32(e.uc.reg_read(UC_ARM_REG_SP) + 4)))))
 e.call("looper_register", 0x24001000)
 c.check("Live Loop list: 0x17c 'Live Loop:' Off / Replace / Overdub, xml 'liveloop'",
-        seen.get(0x17C) == ("Live Loop:", 3, ["Off", "Replace", "Overdub"], "liveloop"), seen.get(0x17C))
+        seen.get(0x17C) == ("Live Loop:", 3, ["Off", "Replace ?", "Overdub ?"], "liveloop"), seen.get(0x17C))
 
 # --- memory: one block for all loops, only while 3 MB stay free for the firmware
 e.call("looper_boot")
@@ -295,6 +302,7 @@ pad_store(0, 0, 1)
 transport(0)
 e.call("looper_block", CTX, N)
 c.check("too little free memory: no loop memory taken", e.r32(0x38000040, False) == 0)
+c.check("status with no memory: 'Replace mem'", status() == "Replace mem", status())
 e.w32(0x2400008C, 0xC0000000 + (7 << 20))             # 7 MB free (a real unit): 4 MB, 262144 frames per loop
 e.call("looper_block", CTX, N)
 c.check("7 MB free: 4 MB taken, 5.4 s per loop", e.r32(0x38000040, False) != 0 and e.r32(0x38000044, False) == 262144,

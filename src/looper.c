@@ -58,7 +58,40 @@ typedef float (*db_fn)(float db);
 #define fw_db_to_gain   ((db_fn)FN(0x0809f5b4))
 
 static const float length_quarters[11] = {4, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512};   /* Custom counts as 1 bar */
-const char *const liveloop_names[3] = {"Off", "Replace", "Overdub"};
+/*
+ * Status, shown in the setting's own value: "Replace REC" while the pad records and plays its loop, otherwise a short
+ * reason it doesn't (the first Live Loop pad's): "?" no pad with Live Loop on seen yet, "tempo" no valid tempo, "mem"
+ * no memory for loops, "full" four loops in use, "len" the Length is too long (or too short) for a loop, "play" the pad
+ * isn't playing. The value names live in RAM so they can change; the screen shows the new text when it next redraws.
+ */
+enum { ST_NONE, ST_TEMPO, ST_MEM, ST_FULL, ST_LEN, ST_PLAY, ST_REC };
+static const char *const status_text[] = {"?", "tempo", "mem", "full", "len", "play", "REC"};
+#define NAMES  ((const char **)(MOD_RAM + 0x3800u))   /* Off, Replace .., Overdub .. */
+#define NAME_R ((char *)(MOD_RAM + 0x3810u))
+#define NAME_O ((char *)(MOD_RAM + 0x3820u))
+#define STATUS (*(volatile uint8_t *)(MOD_RAM + 0x3830u))
+
+static void name_set(char *dst, const char *mode, const char *st)
+{
+    while (*mode)
+        *dst++ = *mode++;
+    *dst++ = ' ';
+    while (*st)
+        *dst++ = *st++;
+    *dst = 0;
+}
+
+static void status_show(unsigned st)
+{
+    if (st == STATUS && NAMES[1] == NAME_R)
+        return;
+    STATUS = (uint8_t)st;
+    name_set(NAME_R, "Replace", status_text[st]);
+    name_set(NAME_O, "Overdub", status_text[st]);
+    NAMES[0] = "Off";
+    NAMES[1] = NAME_R;
+    NAMES[2] = NAME_O;
+}
 
 struct slot {
     int8_t pad;                   /* app pad index (row * 5 + col), -1 free */
@@ -253,8 +286,10 @@ void looper_block(uint8_t *ctx, int n)
         return;
     const uint8_t *transport = *(const uint8_t **)ctx;
     float tempo = transport ? *(const float *)(transport + 0x18) : 0.0f;
-    if (!(tempo >= 20.0f && tempo <= 400.0f))
+    if (!(tempo >= 20.0f && tempo <= 400.0f)) {
+        status_show(ST_TEMPO);
         return;
+    }
     int64_t now = *(const int64_t *)transport;
     const void *rec = (const void *)APP_REC;
     int per_pad = fw_store_get(rec, P_RECCONF) != 0;
@@ -264,6 +299,8 @@ void looper_block(uint8_t *ctx, int n)
     bus_chans(ctx + 0x1588c, &in_l, &in_r);
     float gain = fw_db_to_gain((float)fw_store_get(rec, P_GAIN) / 1000.0f);
 
+    unsigned st = ST_NONE;
+#define STATUS_OF(x) do { if (st == ST_NONE) st = (x); } while (0)
     for (int p = 0; p < PADS; p++) {
         const void *store = store_of(p);
         int mode = store_live(store) ? fw_store_get(store, P_LIVELOOP) : 0;
@@ -276,15 +313,19 @@ void looper_block(uint8_t *ctx, int n)
             continue;
         }
         if (si < 0) {
-            if (!take_arena())
+            if (!take_arena()) {
+                STATUS_OF(ST_MEM);
                 continue;                           /* no memory for loops: stock playback */
+            }
             for (int i = 0; i < SLOTS; i++)
                 if (LP->slot[i].pad < 0) {
                     si = i;
                     break;
                 }
-            if (si < 0)
+            if (si < 0) {
+                STATUS_OF(ST_FULL);
                 continue;                           /* all four loops in use */
+            }
             struct slot *s = &LP->slot[si];
             s->pad = (int8_t)p;
             s->len = 0;
@@ -299,8 +340,10 @@ void looper_block(uint8_t *ctx, int n)
         int32_t len = (int32_t)(q * 48000.0f * 60.0f / tempo + 0.5f);
         if (len < n || (uint32_t)len > CAP) {
             s->len = 0;                             /* too short or too long for a loop buffer: stock playback */
+            STATUS_OF(ST_LEN);
             continue;
         }
+        STATUS_OF(s->played == LP->block - 1 ? ST_REC : ST_PLAY);   /* did its voice play the loop last block? */
         if (len != s->len) {
             s->len = len;
             s->prefill = len;
@@ -353,6 +396,7 @@ void looper_block(uint8_t *ctx, int n)
         s->played = LP->block - 1;                 /* play buffer ready, not output yet */
         s->ready = LP->block;
     }
+    status_show(st);
 }
 
 /* After the engine's block: keep the Resam source (bus 3) for the next block. */
@@ -404,5 +448,7 @@ void loop_voice_render(uint8_t *pad, uint8_t *voice, void *scratch, void *tmp, v
 /* Registration: Live Loop list, id 0x17c, xml "liveloop" (called from mod_register). */
 void looper_register(void *table)
 {
-    fw_register_list(table, P_LIVELOOP, "Live Loop:", liveloop_names, 3, "liveloop");
+    STATUS = 0xff;
+    status_show(ST_NONE);
+    fw_register_list(table, P_LIVELOOP, "Live Loop:", NAMES, 3, "liveloop");
 }
