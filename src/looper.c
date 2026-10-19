@@ -589,6 +589,7 @@ int loop_clip_chans(void *buf, float **l, float **r)
  * instead, as it is being recorded: a grain at position pos of the sample starts at the same fraction of the loop.
  */
 #define GRAIN_PARK (*(volatile int32_t *)(MOD_RAM + 0x3884u))  /* 1 + slot of the granular voice in render, or 0 */
+#define GRAIN_OFF  (*(volatile int32_t *)(MOD_RAM + 0x3888u))  /* its Position, frames into the sample (grain.c) */
 
 void loop_grain_render(uint8_t *pad, int a2, uint8_t *voice, int a4, void *a5, void *a6, void *block)
 {
@@ -601,6 +602,8 @@ void loop_grain_render(uint8_t *pad, int a2, uint8_t *voice, int a4, void *a5, v
     if (s && s->len && (voice[0] || !s->why))
         s->why = !voice[0] ? ST_VOICE : s->ready != LP->block ? ST_SYNC : 0;
     GRAIN_PARK = 0;
+    void *vw = *(void **)(voice + 0xc);
+    GRAIN_OFF = voice[0] ? grain_prepare(pad, vw ? fw_wave_len(vw) : 0) : 0;
     if (s && s->len && s->ready == LP->block && voice[0]) {
         void *wave = *(void **)(voice + 0xc);
         if (wave != s->wave) {                      /* new sample on the pad: the loop restarts from it */
@@ -612,15 +615,26 @@ void loop_grain_render(uint8_t *pad, int a2, uint8_t *voice, int a4, void *a5, v
     }
     fw_grain_render(pad, a2, voice, a4, a5, a6, block);
     GRAIN_PARK = 0;
+    GRAIN_OFF = 0;
 }
 
 int loop_grain_read(void *wave, float *l, float *r, int n, int pos)
 {
-    int park = GRAIN_PARK;
-    if (!park)
-        return fw_wave_read2(wave, l, r, n, pos);
+    int park = GRAIN_PARK, off = GRAIN_OFF;
+    int wl = wave && (park || off) ? fw_wave_len(wave) : 0;
+    if (off && wl > 0) {                            /* Position: the window starts further into the sample */
+        pos += off;
+        while (pos >= wl)
+            pos -= wl;
+    }
+    if (!park) {
+        if (!off || wl <= 0 || pos + n <= wl)
+            return fw_wave_read2(wave, l, r, n, pos);
+        int k = wl - pos;                           /* runs past the end: the rest from the start */
+        int ok = fw_wave_read2(wave, l, r, k, pos);
+        return fw_wave_read2(wave, l + k, r + k, n - k, 0) && ok;
+    }
     struct slot *s = &LP->slot[park - 1];
-    int wl = wave ? fw_wave_len(wave) : 0;
     uint32_t len = (uint32_t)s->len;
     uint32_t at = wl > 0 && pos > 0 ? (uint32_t)((float)pos / (float)wl * (float)len) : 0;
     if (at >= len)

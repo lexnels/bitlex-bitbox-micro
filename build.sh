@@ -6,7 +6,7 @@ set -e
 cd "$(dirname "$0")"
 mkdir -p out/obj
 CFLAGS="-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -Os -ffreestanding -nostdlib -fno-builtin -Wall -Wextra -Werror"
-SRCS="src/mod.c src/filter.c src/filter_thunk.S src/looper.c src/bringup.c"
+SRCS="src/mod.c src/filter.c src/filter_thunk.S src/looper.c src/grain.c src/bringup.c"
 OBJS=""
 for s in $SRCS; do
   o="out/obj/$(basename "$s" | sed 's/\.[cS]$/.o/')"

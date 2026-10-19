@@ -38,6 +38,16 @@ as **2.3.4-L2**.
   right of it, off at centre). From noon up, Res also drives the filter, so high resonance growls instead of only
   getting louder.
 
+- **Granular controls:** four new settings on the Granular pad page, after Speed:
+  - **Shape** (0-100 %, default 50 %): the grain envelope. 0 % is plucky (no attack, short release), 50 % the stock
+    smooth window, 100 % a swell (long attack, no decay); it morphs in between.
+  - **Grain Sync** (Free / Beat, default Free): Free is stock (grains follow Density). Beat starts each new grain on the
+    next step of the **Sync Rate** grid (1/64, 1/32, 1/16, 1/8, 1/4, 1/2, 1, 2 or 4 bars, default 1/16), locked to the
+    song position, one grain per step. How many steps get a grain depends on Grain Count and Grain Size: a slot only
+    takes a new step once its grain has finished.
+  - **Position** (0-100 %, default 0 %): where the window starts in the sample. It's added to the stock read position,
+    so Speed still scans from there, and wraps around the end of the sample.
+
 ### Using Live Loop
 
 1. On the pad, set **Live Loop** to Replace or Overdub, and set the loop **Length** (Rec settings), for example 1 bar.
@@ -93,7 +103,7 @@ it to `MICRO.bin`. Then copy it to the microSD card as in step 3 below.
 3. Copy the modded `MICRO.bin` to the root of the microSD card and install it the same way as an official 1010music
    firmware update (see 1010music's bitbox micro update instructions).
 
-The modded file is about 9.7 KB longer than the stock one (the mod's code is appended at the end).
+The modded file is about 11.7 KB longer than the stock one (the mod's code is appended at the end).
 
 ### Going back to stock firmware
 
@@ -136,7 +146,7 @@ These were left out for now:
 ## How it works
 
 `MICRO.bin` is one image for the STM32H7's Cortex-M7, mapped at `0x08040000` (the bootloader below it isn't in the
-file). The stock image ends at `0x080E3E90`; the mod's code (`src/`, built into `out/cave.bin`, about 9.7 KB) is
+file). The stock image ends at `0x080E3E90`; the mod's code (`src/`, built into `out/cave.bin`, about 11.7 KB) is
 appended there, and a few `bl` instructions are redirected into it. The startup copy table already lists
 `0x080E3E90` as an empty section, so nothing at boot touches the appended code. The cave has no `.data` or `.bss`
 (the build fails if any appears); the mod's state lives in SRAM4 at `0x38000000` (64 KB, unused by the stock
@@ -146,8 +156,8 @@ Hooks (`patches/`, each patch checks the stock bytes before writing):
 
 | site | stock call | new | what |
 |---|---|---|---|
-| `0x0806B34A` | `FUN_08069E7C` (register list) | `mod_register` | Interp list becomes Fidelity; registers Live Loop (id `0x17C`, xml `liveloop`); allocates the loops |
-| `0x08089740`, `0x08089960` | `FUN_0808951E` (store add) | `mod_pad_store` | adds Live Loop (Off) to every pad's settings store |
+| `0x0806B34A` | `FUN_08069E7C` (register list) | `mod_register` | Interp list becomes Fidelity; registers Live Loop (id `0x17C`) and the granular controls (`0x17D`-`0x180`) |
+| `0x08089740`, `0x08089960` | `FUN_0808951E` (store add) | `mod_pad_store` | adds Live Loop and the granular controls to every pad's settings store |
 | `0x0809418A` | `FUN_08096530` (engine block) | `engine_block` | the looper runs before and after each 128-frame block |
 | `0x080B25D6` | `FUN_080AEC34` (voice render) | `loop_voice_render` | a Live Loop Sample pad's voice plays the loop |
 | `0x080B7DCE`, `0x080B7DEC`, `0x080B7FB0`; `0x080B5CB4` | `FUN_080B5AA8` (clip voice render); `FUN_080A3228` in it | `loop_clip_render`, `loop_clip_chans` | Clip and Slicer pads: the loop takes the sample's place |
@@ -155,6 +165,9 @@ Hooks (`patches/`, each patch checks the stock bytes before writing):
 | `0x080AD960`, `0x080B5CCC` | `FUN_080B8420` (pad filter) | `filter_voice_a/b` | 24 dB SVF, crunch |
 | `0x080AEE92`, `0x080AF0D8`, `0x080AF19A`, and six reader calls | sample readers | `voice_read`, `read_normal`, `read_hq` | Fidelity machine modes |
 | nine page variants (`patches/looper.py`) | empty page slot | `0x17C` | Live Loop on every pad settings page |
+| `0x080AFAC8` | `FUN_080AF5A0` (grain respawn) | `grain_spawn` | Grain Sync: the next grain starts on the grid |
+| `0x080AFAE8` (literal) | grain window `0x080CAC00` | `0x38008000` | Shape: the grain render reads the mod's window table |
+| `0x080C7060`, `0x080C727C` | empty page slots | `0x17D`-`0x180` | Shape, Grain Sync, Sync Rate, Position on the Granular page |
 | `0x080C5770` | `"2.3.4"` | `"2.3.4-L2"` | version string |
 
 ## Live Loop in detail
@@ -182,6 +195,18 @@ Loops: one block of up to 4 MB of 16-bit stereo, split into four loops (5.4 s ea
 (SDRAM, between the bump allocator at `0x24000088` and the top-down allocator at `0x2400008C`) the first time a pad uses
 Live Loop, only while 3 MB more stay free.
 
+## Granular controls in detail
+
+`src/grain.c`. The grain render `FUN_080AF8B4` multiplies each grain by an 8192-point window (the Hann window at
+`0x080CAC00`, through one literal). That literal now points at a table in SRAM4, which `grain_prepare` refills
+(stock window blended with the plucky or the swell envelope) whenever the pad being rendered has a different Shape from
+the one in the table. A grain that ends spawns the next one in its slot (`FUN_080AF5A0`); with Grain Sync on Beat,
+`grain_spawn` moves the new grain's start (`grain + 0x28`, frames from the block's start) to the next grid step after
+its own start that no earlier grain of the pad took. The grid runs on the song position, followed like the Live Loop:
+only while the transport runs on steadily. Position is added to every grain read (`loop_grain_read`), wrapping. The
+settings are ids `0x17D`-`0x180` (xml `grainshape`, `grainsync`, `grainrate`, `grainpos`) in every pad's settings
+store.
+
 ## Build
 
 Needs `arm-none-eabi-gcc` and Python 3 (and `pip install unicorn capstone` for the tests). Put your stock 2.3.4 image
@@ -189,8 +214,9 @@ at `firmware/MICRO-2.3.4.bin` (SHA-256 `54ecc3e5c09b9aed7ad8e2d9d1c9f8ee63e06a83
 
 ```
 ./build.sh                      # src/ -> out/cave.bin
-python3 patch.py all            # -> out/mod/MICRO.bin (mod, filter, looper, cave)
+python3 patch.py all            # -> out/mod/MICRO.bin (mod, filter, looper, grain, cave)
 python3 tests/test_filter.py    # Fidelity and filter hooks on the real firmware code under Unicorn
+python3 tests/test_grain.py     # granular Shape (through the real grain render), Sync and Position under Unicorn
 python3 tests/test_looper.py    # Live Loop under Unicorn: phase lock, replace, overdub, inputs, gain, fallbacks (a few minutes)
 python3 tools/make_patcher.py v0.2   # -> out/release/bitlex-micro-v0.2-patcher.py (copy it to releases/)
 python3 tools/make_web.py       # -> docs/index.html, the browser patcher (GitHub Pages, from main /docs)

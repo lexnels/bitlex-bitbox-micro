@@ -13,15 +13,17 @@ void mod_register(void *table, int param, const char *label, const char *const *
 {
     interp_register(table, param, label, names, count, xml);
     looper_register(table);
+    grain_register(table);
     looper_boot();
 }
 
 /* Replaces the pad settings store's "Interp = Normal" entry (FUN_08089548, pad types 3 and 0x45): the entry, then
-   the mod's per-pad settings. Stores hold 64 entries; these types use 56 and 37. */
+   the mod's per-pad settings. Stores hold 64 entries; these types use 56 and 37, the mod adds 5. */
 void mod_pad_store(void *store, unsigned param, int value)
 {
     fw_store_add(store, param, value);
     fw_store_add(store, P_LIVELOOP, 0);
+    grain_pad_store(store);
 }
 
 typedef void (*engine_fn)(uint8_t *engine, void *out, void *events);
@@ -34,6 +36,7 @@ void engine_block(uint8_t *engine, void *out, void *events)
 {
     uint8_t *ctx = engine + CTX_OFF;
     int n = fw_buf_frames(ctx + BUS0);
+    grain_clock(*(const uint8_t **)ctx, n);
     looper_block(ctx, n);
     fw_engine_process(engine, out, events);
     looper_after(ctx, n);
