@@ -11,6 +11,8 @@ PATCHES = [
     hook(0x080B7DEC, 0x080B5AA8, "loop_clip_render"),
     hook(0x080B7FB0, 0x080B5AA8, "loop_clip_render"),
     hook(0x080B5CB4, 0x080A3228, "loop_clip_chans"),     # in the clip render: the voice's channels
+    hook(0x080B1468, 0x080AFAF0, "loop_grain_render"),   # granular pads: per-voice render
+    hook(0x080AF962, 0x080A44C8, "loop_grain_read"),     # in the grain render: the grain's sample read
     # pad settings pages (Launch Mode, Output, ..., Pad Note): + Live Loop at the end. Every variant of the page, one per
     # pad type (3, 0x45) and play mode: they all belong to the two store types that carry Live Loop (mod_pad_store).
     (0x080C6BEA, struct.pack("<H", 0), struct.pack("<H", 0x17C)),

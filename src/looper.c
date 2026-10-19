@@ -59,6 +59,8 @@ typedef float (*db_fn)(float db);
 typedef void (*clip_render_fn)(uint8_t *pad, int a2, uint8_t *voice, int a4, uint8_t *flag, void *out, void *block);
 typedef void (*buf_limit_fn)(void *buf, int n);
 #define fw_clip_render  ((clip_render_fn)FN(0x080b5aa8))
+typedef void (*grain_render_fn)(uint8_t *pad, int a2, uint8_t *voice, int a4, void *a5, void *a6, void *block);
+#define fw_grain_render ((grain_render_fn)FN(0x080afaf0))
 #define fw_buf_limit    ((buf_limit_fn)FN(0x080a31c8))        /* frames = n, if n fits */
 
 static const float length_quarters[11] = {4, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512};   /* Custom counts as 1 bar */
@@ -537,6 +539,57 @@ int loop_clip_chans(void *buf, float **l, float **r)
     for (int i = 0; i < n; i++) {
         (*l)[i] = pl ? pl[i] : 0.0f;
         (*r)[i] = pr ? pr[i] : 0.0f;
+    }
+    return 1;
+}
+
+/*
+ * Granular pads render through FUN_080afaf0(pad, a2, voice, a4, a5, a6, block) (bl at 0x080b1468), whose grains read
+ * the sample with FUN_080a44c8(wave, l, r, n, pos) (bl at 0x080af962). For a Live Loop pad the grains read the loop
+ * instead, as it is being recorded: a grain at position pos of the sample starts at the same fraction of the loop.
+ */
+#define GRAIN_PARK (*(volatile int32_t *)(MOD_RAM + 0x3884u))  /* 1 + slot of the granular voice in render, or 0 */
+
+void loop_grain_render(uint8_t *pad, int a2, uint8_t *voice, int a4, void *a5, void *a6, void *block)
+{
+    int p = LP->magic == LMAGIC ? pad_index_of(pad) : -1;
+    int si = p >= 0 ? LP->pad_slot[p] : -1;
+    struct slot *s = si >= 0 ? &LP->slot[si] : 0;
+    HOOK_CALLS++;
+    if (voice[0])
+        SEEN_ID = pad_ptr_ok(pad) ? *(const uint32_t *)(pad + 0x18) : 0xeeeeeeu;
+    if (s && s->len && (voice[0] || !s->why))
+        s->why = !voice[0] ? ST_VOICE : s->ready != LP->block ? ST_SYNC : 0;
+    GRAIN_PARK = 0;
+    if (s && s->len && s->ready == LP->block && voice[0]) {
+        void *wave = *(void **)(voice + 0xc);
+        if (wave != s->wave) {                      /* new sample on the pad: the loop restarts from it */
+            s->wave = wave;
+            s->prefill = s->len;
+        }
+        s->played = LP->block;
+        GRAIN_PARK = si + 1;
+    }
+    fw_grain_render(pad, a2, voice, a4, a5, a6, block);
+    GRAIN_PARK = 0;
+}
+
+int loop_grain_read(void *wave, float *l, float *r, int n, int pos)
+{
+    int park = GRAIN_PARK;
+    if (!park)
+        return fw_wave_read2(wave, l, r, n, pos);
+    struct slot *s = &LP->slot[park - 1];
+    int wl = wave ? fw_wave_len(wave) : 0;
+    uint32_t len = (uint32_t)s->len;
+    uint32_t at = wl > 0 && pos > 0 ? (uint32_t)((float)pos / (float)wl * (float)len) : 0;
+    if (at >= len)
+        at %= len;
+    for (int i = 0; i < n; i++) {
+        l[i] = (float)s->l[at] * (1.0f / 32768.0f);
+        r[i] = (float)s->r[at] * (1.0f / 32768.0f);
+        if (++at >= len)
+            at = 0;
     }
     return 1;
 }

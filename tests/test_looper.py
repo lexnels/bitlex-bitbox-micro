@@ -133,7 +133,8 @@ def block(k, render_pads=((PAD, VOICE),), now0=0):
 img = e.image
 for at, name in [(0x0806B34A, "mod_register"), (0x0809418A, "engine_block"), (0x08089740, "mod_pad_store"),
                  (0x08089960, "mod_pad_store"), (0x080B25D6, "loop_voice_render"), (0x080B7DCE, "loop_clip_render"),
-                 (0x080B7DEC, "loop_clip_render"), (0x080B7FB0, "loop_clip_render"), (0x080B5CB4, "loop_clip_chans")]:
+                 (0x080B7DEC, "loop_clip_render"), (0x080B7FB0, "loop_clip_render"), (0x080B5CB4, "loop_clip_chans"),
+                 (0x080B1468, "loop_grain_render"), (0x080AF962, "loop_grain_read")]:
     c.check(f"bl at {at:#x} -> {name}", bl_target(img, at) == e.sym[name] & ~1)
 LL_PAGES = [0x080C6BEA, 0x080C6E06, 0x080C70BA, 0x080C72D6, 0x080C7892, 0x080C7AAE, 0x080C7CC8, 0x080C7FF6, 0x080C8214]
 c.check("all nine pad settings page variants end with Live Loop (0x17c) after Pad Note",
@@ -216,6 +217,29 @@ cr = struct.unpack(f"<{N}f", e.rd(e.r32(PP + 4, False), 4 * N))
 c.check("clip pad: the channels the render gets are the loop (input from one loop earlier), stereo",
         all(abs(cl[i] - enc(kc * N + i - LEN + 1)) < 1e-3 and abs(cr[i] + enc(kc * N + i - LEN + 1)) < 1e-3
             for i in range(N)) and e.r32(TMP + 4, False) == N, (cl[:2], cr[:2]))
+e.call("looper_after", CTX, N)
+blocks += 1
+
+# --- granular pads: the grains read the loop at the same fraction of it as of the sample
+grain_park = []
+e.stub(0x080AFAF0, lambda: grain_park.append(e.r32(0x38003884, False)))
+kc = blocks
+transport(kc * N)
+set_input(kc)
+e.call("looper_block", CTX, N)
+e.call("loop_grain_render", PAD, 0, VOICE, 0, 0, stack_args=(0, BLOCK))
+c.check("granular pad: stock grain render runs with the loop parked", grain_park == [1], grain_park)
+SL = 0x38000100 + 32
+gl_ptr, gr_ptr = e.r32(SL + 20, False), e.r32(SL + 24, False)
+e.w32(0x38003884, 1)
+e.call("loop_grain_read", WAVE, TL, TR, N, stack_args=(LEN // 2,))   # the wave is LEN long, as is the loop: same index
+e.w32(0x38003884, 0)
+gl = struct.unpack(f"<{N}f", e.rd(TL, 4 * N))
+gr = struct.unpack(f"<{N}f", e.rd(TR, 4 * N))
+want_l = [x / 32768.0 for x in struct.unpack(f"<{N}h", e.rd(gl_ptr + LEN // 2 * 2, 2 * N))]
+want_r = [x / 32768.0 for x in struct.unpack(f"<{N}h", e.rd(gr_ptr + LEN // 2 * 2, 2 * N))]
+c.check("granular pad: a grain at the middle of the sample reads the middle of the loop",
+        list(gl) == want_l and list(gr) == want_r and any(want_l), (gl[:2], want_l[:2]))
 e.call("looper_after", CTX, N)
 blocks += 1
 k = blocks
