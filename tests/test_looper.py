@@ -188,6 +188,10 @@ for k in range(1, blocks):
 c.check("first pass plays the pad's sample at the loop position (mono sample on both sides)", ok_first, bad)
 c.check("after that, Replace plays exactly the input from one loop (24000 frames) earlier, L and R", ok_after, bad)
 c.check("status while it records and plays: 'Replace REC'", status() == "Replace REC", status())
+k = blocks
+for _ in range(2):                                    # the voice render never runs: the hook isn't on its path
+    transport(k * N); set_input(k); e.call("looper_block", CTX, N); e.call("looper_after", CTX, N); k += 1
+c.check("status when no voice render reaches the mod: 'Replace nohook'", status() == "Replace nohook", status())
 
 # --- the loop is locked to the song position, not to when the pad started
 SLOT0 = 0x38000100 + 32                               # struct looper: magic, block, frames, pad_slot[20]

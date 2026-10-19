@@ -62,14 +62,18 @@ static const float length_quarters[11] = {4, 1, 2, 4, 8, 16, 32, 64, 128, 256, 5
  * Status, shown in the setting's own value: "Replace REC" while the pad records and plays its loop, otherwise a short
  * reason it doesn't (the first Live Loop pad's): "?" no pad with Live Loop on seen yet, "tempo" no valid tempo, "mem"
  * no memory for loops, "full" four loops in use, "len" the Length is too long (or too short) for a loop, "play" the pad
- * isn't playing. The value names live in RAM so they can change; the screen shows the new text when it next redraws.
+ * isn't playing; when the pad plays its sample anyway, why its voice skipped the loop: "nohook" the voice render the
+ * mod hooks didn't run at all, "pad" it ran but never for this pad, "sync" the loop wasn't ready that block, "size"
+ * the voice block is a different size from the engine block, "voice" the voice was idle. The value names live in RAM so they can change; the screen shows the new text when it next redraws.
  */
-enum { ST_NONE, ST_TEMPO, ST_MEM, ST_FULL, ST_LEN, ST_PLAY, ST_REC };
-static const char *const status_text[] = {"?", "tempo", "mem", "full", "len", "play", "REC"};
+enum { ST_NONE, ST_TEMPO, ST_MEM, ST_FULL, ST_LEN, ST_PLAY, ST_REC, ST_NOHOOK, ST_PAD, ST_SYNC, ST_SIZE, ST_VOICE };
+static const char *const status_text[] = {"?", "tempo", "mem", "full", "len", "play", "REC",
+                                          "nohook", "pad", "sync", "size", "voice"};
 #define NAMES  ((const char **)(MOD_RAM + 0x3800u))   /* Off, Replace .., Overdub .. */
 #define NAME_R ((char *)(MOD_RAM + 0x3810u))
 #define NAME_O ((char *)(MOD_RAM + 0x3820u))
 #define STATUS (*(volatile uint8_t *)(MOD_RAM + 0x3830u))
+#define HOOK_CALLS (*(volatile uint32_t *)(MOD_RAM + 0x3834u))   /* loop_voice_render calls since the last block */
 
 static void name_set(char *dst, const char *mode, const char *st)
 {
@@ -96,7 +100,8 @@ static void status_show(unsigned st)
 struct slot {
     int8_t pad;                   /* app pad index (row * 5 + col), -1 free */
     uint8_t mode;
-    uint16_t unused;
+    uint8_t why;                  /* why its voice last skipped the loop (ST_SYNC ..), 0 if it never got there */
+    uint8_t unused;
     int32_t len;                  /* loop length in frames */
     int32_t prefill;              /* frames of the first pass still to come from the pad's sample */
     void *wave;                   /* the pad's sample, as last seen by its voice */
@@ -300,6 +305,8 @@ void looper_block(uint8_t *ctx, int n)
     float gain = fw_db_to_gain((float)fw_store_get(rec, P_GAIN) / 1000.0f);
 
     unsigned st = ST_NONE;
+    int hooked = HOOK_CALLS != 0;
+    HOOK_CALLS = 0;
 #define STATUS_OF(x) do { if (st == ST_NONE) st = (x); } while (0)
     for (int p = 0; p < PADS; p++) {
         const void *store = store_of(p);
@@ -343,7 +350,11 @@ void looper_block(uint8_t *ctx, int n)
             STATUS_OF(ST_LEN);
             continue;
         }
-        STATUS_OF(s->played == LP->block - 1 ? ST_REC : ST_PLAY);   /* did its voice play the loop last block? */
+        if (s->played == LP->block - 1)         /* did its voice play the loop last block? */
+            STATUS_OF(ST_REC);
+        else
+            STATUS_OF(!hooked ? ST_NOHOOK : s->why ? s->why : ST_PAD);
+        s->why = 0;
         if (len != s->len) {
             s->len = len;
             s->prefill = len;
@@ -418,6 +429,9 @@ void loop_voice_render(uint8_t *pad, uint8_t *voice, void *scratch, void *tmp, v
     int p = LP->magic == LMAGIC ? pad_index_of(pad) : -1;
     int si = p >= 0 ? LP->pad_slot[p] : -1;
     struct slot *s = si >= 0 ? &LP->slot[si] : 0;
+    HOOK_CALLS++;
+    if (s && s->len && (voice[0] || !s->why))     /* an idle voice of the pad doesn't hide an active one's reason */
+        s->why = !voice[0] ? ST_VOICE : s->ready != LP->block ? ST_SYNC : fw_buf_frames(block) != LP->frames ? ST_SIZE : 0;
     if (!s || s->len == 0 || s->ready != LP->block || !voice[0]) {
         fw_voice_render(pad, voice, scratch, tmp, out, block);
         return;
