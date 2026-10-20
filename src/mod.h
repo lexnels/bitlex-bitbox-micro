@@ -10,7 +10,7 @@
  *   0x1000  looper.c   play buffers, 4 x (L 1 KB, R 1 KB)
  *   0x3000  looper.c   Resam source, L 1 KB, R 1 KB
  *   0x3800  looper.c   Live Loop value names and status, parks
- *   0x3890  grain.c    window shape, song clock; 0x3900 per-pad last grid grain (20 doubles)
+ *   0x3890  grain.c    window shape, song clock
  *   0x8000  grain.c    grain window table (8192 floats, 32 KB)
  */
 

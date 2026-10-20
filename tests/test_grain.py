@@ -201,27 +201,42 @@ pad_store(1, 2, sync=0, rate=7)
 c.check("Grain Sync Free: the stock start stays", spawn_with(700) == 700)
 pad_store(1, 2, sync=1, rate=7)
 d1 = spawn_with(700)                                  # wants 144800: next 1/16 step is 150000
-d2 = spawn_with(50)                                   # wants 144150, step 150000 is taken: 156000
 c.check("Grain Sync Beat 1/16: starts on the next step (150000 - 144100 = 5900 frames)", d1 == 5900, d1)
-c.check("Grain Sync Beat: one grain per step, the next grain takes the following step (11900)", d2 == 11900, d2)
+GRAINS = 0x2407B000                                   # the voice's grains: one already waits for step 150000
+e.wr(GRAINS, bytes(8 * 0x40))
+e.w8(GRAINS, 1)
+e.w32(GRAINS + 0x28, d1)
+e.w32(VOICE + 0x138, GRAINS)
+d2 = spawn_with(50)                                   # wants 144150, step 150000 is taken: 156000
+c.check("Grain Sync Beat: one grain per step, past the steps the voice's waiting grains take (11900)", d2 == 11900, d2)
+e.w32(GRAINS + 0x40 + 0x28, 11900)                    # and 156000 is taken too: 162000
+e.w8(GRAINS + 0x40, 1)
+d2b = spawn_with(50)
+c.check("Grain Sync Beat: two steps taken, the grain takes the third (17900)", d2b == 17900, d2b)
+e.w32(VOICE + 0x138, 0)
 pad_store(1, 2, sync=1, rate=19)                      # 1 bar = 96000
 d3 = spawn_with(0)
 c.check("Sync Rate 1 bar: the next bar line (192000 - 144100)", d3 == 192000 - 144100, d3)
-pad_store(1, 2, sync=1, rate=6)                       # 1/16 triplet = 4000: after 192000 comes 196000
+pad_store(1, 2, sync=1, rate=6)                       # 1/16 triplet = 4000
 d4 = spawn_with(0)
-pad_store(1, 2, sync=1, rate=11)                      # 1/8 dotted = 18000: after 196000 comes 198000
+pad_store(1, 2, sync=1, rate=11)                      # 1/8 dotted = 18000
 d5 = spawn_with(0)
-c.check("Sync Rate 1/16T (4000 frames) and 1/8D (18000 frames) grids", (d4, d5) == (196000 - 144100, 198000 - 144100),
-        (d4, d5))
+c.check("Sync Rate 1/16T (4000 frames: 148000) and 1/8D (18000 frames: 162000) grids",
+        (d4, d5) == (148000 - 144100, 162000 - 144100), (d4, d5))
 pad_store(1, 2, sync=1, rate=7)
 e.w8(VOICE + 0x24, 0)
+e.wr(VOICE + 0x530, struct.pack("<q", 0))             # the stock timeline has fallen behind
 d6 = spawn_with((0, 3000, 20000 - 3000))              # stock: its start passed 3000 frames ago, comes back part-played
 g = struct.unpack("<q", e.rd(GRAIN + 8, 8)) + struct.unpack("<iii", e.rd(GRAIN + 0x2C, 12))
 v530 = struct.unpack("<q", e.rd(VOICE + 0x530, 8))[0]
 c.check("Grain Sync: a late grain starts whole on the grid (progress 0, all 4096 frames, read from its own start)",
         g == (20000, 4096, 0, 4096), g)
-c.check("Grain Sync: the stock grain timeline follows the grid (voice + 0x530 = now + wait + half a grain)",
+c.check("Grain Sync: a stock grain timeline that fell behind catches up (voice + 0x530 = now + wait + half a grain)",
         v530 == 1_000_000 + d6 + 2048, (v530, d6))
+e.wr(VOICE + 0x530, struct.pack("<q", 5_000_000))     # ahead (sparse Density): left alone
+spawn_with(0)
+c.check("Grain Sync: a stock grain timeline that is ahead stays where it is",
+        struct.unpack("<q", e.rd(VOICE + 0x530, 8))[0] == 5_000_000)
 transport(48000 * 3 + 100 + N)                        # transport ran on one block
 e.call("grain_clock", TR, N)
 transport(48000 * 3 + 100 + N)                        # stalled for a block

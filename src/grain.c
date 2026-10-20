@@ -33,7 +33,6 @@
 #define CLK_TP    (*(volatile double *)(MOD_RAM + 0x38a8u))      /* the transport's song position last block */
 #define CLK_OK    (*(volatile uint32_t *)(MOD_RAM + 0x38b0u))
 #define GMAGIC    0x4752414eu                                     /* "GRAN" */
-#define LAST_AT   ((volatile double *)(MOD_RAM + 0x3900u))       /* per pad: song time of its last grid grain, -1 */
 
 static const char *const sync_names[2] = {"Free", "Beat"};
 /* Each division as a triplet (2/3), straight and dotted (3/2), from 1/64 to 1 bar, then 2 and 4 bars */
@@ -129,23 +128,12 @@ void grain_clock(const uint8_t *transport, int n)
     if (CLK_OK != GMAGIC) {
         CLK_OK = GMAGIC;
         CLK_SONG = tp;
-        for (int i = 0; i < 20; i++)
-            LAST_AT[i] = -1.0;
     } else {
         double moved = tp - CLK_TP, run = CLK_SONG + (double)n;
         CLK_SONG = moved > (double)n - 0.5 && moved < (double)n + 0.5 ? tp : run;
     }
     CLK_TP = tp;
     CLK_SPQ = (float)(48000.0 * 60.0 / (double)tempo);
-}
-
-static int pad_index(const uint8_t *pad)
-{
-    if (!pad_ptr_ok(pad))
-        return -1;
-    uint32_t id = *(const uint32_t *)(pad + 0x18);
-    unsigned row = (id >> 8) & 0xff, col = id & 0xff;
-    return row < 4 && col < 5 ? (int)(row * 5 + col) : -1;
 }
 
 typedef void (*spawn_fn)(uint8_t *pad, void *now, uint8_t *voice, int a4, int a5, uint8_t *grain);
@@ -158,9 +146,6 @@ void grain_spawn(uint8_t *pad, void *now, uint8_t *voice, int a4, int a5, uint8_
     fw_grain_spawn(pad, now, voice, a4, a5, grain);
     if (!grain[0] || CLK_OK != GMAGIC || CLK_SPQ <= 0.0f || setting(pad, P_GSYNC, 0) != 1)
         return;
-    int p = pad_index(pad);
-    if (p < 0)
-        return;
     float step = CLK_SPQ * rate_quarters((unsigned)setting(pad, P_GRATE, RATE_1_16));
     double song = CLK_SONG;
     int32_t d = *(int32_t *)(grain + 0x28);
@@ -169,10 +154,23 @@ void grain_spawn(uint8_t *pad, void *now, uint8_t *voice, int a4, int a5, uint8_
     int32_t k = (int32_t)q;
     if ((double)k < q)
         k++;                                                   /* the next step at or after its own start */
-    double t = (double)k * (double)step, last = LAST_AT[p];
-    if (last >= 0.0 && t < last + 1.0 && last - t < 64.0 * (double)step)
-        t = ((double)(int32_t)(last / (double)step + 1e-6) + 1.0) * (double)step;   /* one grain per step */
-    LAST_AT[p] = t;
+    /* one grain per step: past the steps the voice's other waiting grains already start on */
+    double t = (double)k * (double)step;
+    const uint8_t *gs = *(const uint8_t *const *)(voice + 0x138);
+    for (int moved = 1, tries = 0; moved && gs && tries < 9; tries++) {
+        moved = 0;
+        for (int i = 0; i < 8; i++) {
+            const uint8_t *o = gs + i * 0x40;
+            int32_t od = *(const int32_t *)(o + 0x28);
+            if (o == grain || !o[0] || od <= 0)
+                continue;
+            double ot = song + (double)od - t;
+            if (ot > -0.5 * (double)step && ot < 0.5 * (double)step) {
+                t += (double)step;
+                moved = 1;
+            }
+        }
+    }
     double wait = t - song;
     int32_t w = wait > 0.0 ? (int32_t)(wait + 0.5) : 0;
     *(int32_t *)(grain + 0x28) = w;
@@ -180,7 +178,8 @@ void grain_spawn(uint8_t *pad, void *now, uint8_t *voice, int a4, int a5, uint8_
      * A grain whose stock start had already passed comes back part-played (progress + 0x30, its read position moved
      * by as much); on the grid it starts whole. And the stock spawn times the next grains from voice + 0x530 (about the
      * middle of the last grain), which the grid's waits would leave further and further behind until every grain came
-     * back fully played and silent: it follows this grain's middle instead.
+     * back fully played and silent: it's caught up to this grain's middle when behind (never moved back or pushed on,
+     * which would run it away from the stock spacing at low Density).
      */
     int32_t done = *(int32_t *)(grain + 0x30);
     if (done > 0) {
@@ -189,8 +188,11 @@ void grain_spawn(uint8_t *pad, void *now, uint8_t *voice, int a4, int a5, uint8_
         *(int32_t *)(grain + 0x30) = 0;
         *(int32_t *)(grain + 0x2c) = *(int32_t *)(grain + 0x34);
     }
-    if (now)
-        *(int64_t *)(voice + 0x530) = *(const int64_t *)now + w + *(int32_t *)(grain + 0x34) / 2;
+    if (now) {                                     /* only catch the timeline up; it runs ahead by itself when sparse */
+        int64_t at = *(const int64_t *)now + w + *(int32_t *)(grain + 0x34) / 2;
+        if (*(int64_t *)(voice + 0x530) < at)
+            *(int64_t *)(voice + 0x530) = at;
+    }
 }
 
 void grain_register(void *table)

@@ -205,7 +205,7 @@ Live Loop, only while 3 MB more stay free.
 (stock window blended with the plucky or the swell envelope) whenever the pad being rendered has a different Shape from
 the one in the table. A grain that ends spawns the next one in its slot (`FUN_080AF5A0`); with Grain Sync on Beat,
 `grain_spawn` moves the new grain's start (`grain + 0x28`, frames from the block's start) to the next grid step after
-its own start that no earlier grain of the pad took. The grid runs on the song position, followed like the Live Loop:
+its own start that none of the voice's other waiting grains starts on, and moves a stock grain timeline (`voice + 0x530`) that has fallen behind up to it, so held notes keep sounding (also across Density changes). The grid runs on the song position, followed like the Live Loop:
 only while the transport runs on steadily. Position is added to every grain read (`loop_grain_read`), wrapping. The
 settings are ids `0x17D`-`0x180` (xml `grainshape`, `grainsync`, `grainrate`, `grainpos`) in every pad's settings
 store.
@@ -220,6 +220,7 @@ at `firmware/MICRO-2.3.4.bin` (SHA-256 `54ecc3e5c09b9aed7ad8e2d9d1c9f8ee63e06a83
 python3 patch.py all            # -> out/mod/MICRO.bin (mod, filter, looper, grain, cave)
 python3 tests/test_filter.py    # Fidelity and filter hooks on the real firmware code under Unicorn
 python3 tests/test_grain.py     # granular Shape (through the real grain render), Sync and Position under Unicorn
+python3 tests/test_grain_engine.py   # Grain Sync through the real grain engine: held notes across Density changes
 python3 tests/test_looper.py    # Live Loop under Unicorn: phase lock, replace, overdub, inputs, gain, fallbacks (a few minutes)
 python3 tools/make_patcher.py v0.2   # -> out/release/bitlex-micro-v0.2-patcher.py (copy it to releases/)
 python3 tools/make_web.py       # -> docs/index.html, the browser patcher (GitHub Pages, from main /docs)
