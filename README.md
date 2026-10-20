@@ -50,6 +50,9 @@ as **2.3.4-L2**.
     takes a new step once its grain has finished.
   - **Position** (0-100 %, default 0 %): where the window starts in the sample. It's added to the stock read position,
     so Speed still scans from there, and wraps around the end of the sample.
+  - **Poly Mode** (on the page with Launch Mode and Output): Granular pads now play polyphonically like Sample pads
+    (Mono, Poly 2/4/6/8, Poly X); stock firmware always played them mono. Each voice runs its own grains, so many
+    voices with many grains cost a lot of processing: if the audio crackles, lower Poly Mode or Grain Count.
 
 ### Using Live Loop
 
@@ -170,6 +173,8 @@ Hooks (`patches/`, each patch checks the stock bytes before writing):
 | nine page variants (`patches/looper.py`) | empty page slot | `0x17C` | Live Loop on every pad settings page |
 | `0x080AFAC8` | `FUN_080AF5A0` (grain respawn) | `grain_spawn` | Grain Sync: the next grain starts on the grid |
 | `0x080AFAE8` (literal) | grain window `0x080CAC00` | `0x38008000` | Shape: the grain render reads the mod's window table |
+| `0x080AFF9A` | `bne` to the mono path for granular pads (voice start `FUN_080AFF60`) | `nop` | Granular pads follow Poly Mode |
+| `0x080C70BC`, `0x080C72D8` | empty page slots | `0x82` | Poly Mode on the Granular pad's first page |
 | `0x080C7060`, `0x080C727C` | empty page slots | `0x17D`-`0x180` | Shape, Grain Sync, Sync Rate, Position on the Granular page |
 | `0x080C5770` | `"2.3.4"` | `"2.3.4-L2"` | version string |
 

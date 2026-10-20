@@ -52,6 +52,13 @@ def pad_store(row, col, **kv):
     e.w16(addr + 12, 64)
 
 
+c.check("polyphony: the voice start no longer forces granular pads mono (bne at 0x80aff9a -> nop)",
+        img[0x080AFF9A - B:0x080AFF9C - B] == bytes.fromhex("00bf") and img[0x080AFF94 - B:0x080AFF98 - B] ==
+        bytes.fromhex("94f87535"))
+page2 = [struct.unpack_from("<8H", img, a - B) for a in (0x080C70AE, 0x080C72CA)]
+c.check("granular pad page: Poly Mode (0x82) after Live Loop, both variants",
+        all(p == (0x75, 0x77, 0xA6, 0x4D, 0xB2, 0xD6, 0x17C, 0x82) for p in page2), page2)
+
 # --- registration
 seen = {}
 e.stub(0x08069ED4, lambda: seen.setdefault(e.arg(1), ("num", e.cstr(e.arg(3)))))
