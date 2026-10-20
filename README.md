@@ -18,12 +18,15 @@ as **2.3.4-L2**.
 ## What it adds
 
 - **Live Loop pads:** a pad that keeps recording. Set **Live Loop** (last entry on the pad's first settings page,
-  after Pad Note) to **Replace** or **Overdub**, and the pad records its input all the time in loops of the recording
+  after Pad Note) to **Replace**, **Overdub** or **Hold**, and the pad records its input all the time in loops of the recording
   **Length** (1/4 bar up to 128 bars), locked to the tempo and the bar grid. Each pass is what the pad plays during
   the next one, and playback never stops while it records:
   - **Replace:** every pass replaces the loop, so the pad always plays the last bar(s) you played into it.
   - **Overdub:** every pass is added on top of the loop. The loop so far comes back 2.5 dB quieter each pass, so old
     layers fade out over about ten passes, and a soft limiter keeps the sum from clipping.
+  - **Hold:** recording stops and the pad keeps playing the loop as it is. Off goes back to the pad's sample (and
+    drops the loop). The loop isn't written into the sample itself: the micro streams samples from the SD card through
+    a cache that reloads them from the file, so the loop lives only in the mod's loop memory.
 
   It works on Sample, Clip and Slicer pads (the pad plays the loop) and on Granular pads (the grains play from the
   loop as it records). It uses the normal recording settings: **Rec Input** (In 1/2, In 1, In 2 or Resam), recording **Gain** and
@@ -60,7 +63,7 @@ The Live Loop value also shows what the loop is doing (the screen updates it whe
 
 | shows | means |
 |---|---|
-| Replace REC | recording and playing the loop |
+| Replace REC | recording and playing the loop (Hold shows Hold PLAY) |
 | Replace REC t | recording, but the transport isn't moving on steadily, so the loop keeps time by itself |
 | Replace play | ready, but the pad isn't playing: trigger it |
 | Replace len | the Length is too long for loop memory |

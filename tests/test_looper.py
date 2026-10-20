@@ -296,6 +296,18 @@ want = soft(enc(t - LEN + 1) + 0.75 * enc(t - 2 * LEN + 1))
 c.check("Overdub: pass 3 plays pass 2 input + pass 1 at -2.5 dB, soft-limited", abs(results[t] - want) < 1e-4,
         (results[t], want))
 
+# --- hold: recording stops, the loop keeps playing as it is
+pad_store(1, 2, 3)
+k0 = 3 * LEN // N + 4
+held = []
+for k in range(k0, k0 + LEN // N + 8):
+    st, _ = block(k)[0]
+    held += st[0][2] if st else [None] * N
+again = held[LEN:LEN + 4 * N]                         # one whole loop later: the same as before, though input came in
+first = held[:4 * N]
+c.check("Hold: no recording, one loop later it plays exactly the same", again == first and any(first),
+        (first[:2], again[:2]))
+
 # --- sources: In 1 on both sides, Resam = what bus 3 held a block earlier
 clear_pads()
 e.call("looper_boot")
@@ -370,11 +382,11 @@ c.check("engine_block runs the engine's block process once", order == ["engine"]
 # --- Live Loop list registration
 seen = {}
 e.stub(0x08069E7C, lambda: seen.setdefault(e.arg(1), (e.cstr(e.arg(2)), e.r32(e.uc.reg_read(UC_ARM_REG_SP)),
-                                                        [e.cstr(e.r32(e.arg(3) + 4 * i)) for i in range(3)],
+                                                        [e.cstr(e.r32(e.arg(3) + 4 * i)) for i in range(4)],
                                                         e.cstr(e.r32(e.uc.reg_read(UC_ARM_REG_SP) + 4)))))
 e.call("looper_register", 0x24001000)
-c.check("Live Loop list: 0x17c 'Live Loop:' Off / Replace / Overdub, xml 'liveloop'",
-        seen.get(0x17C) == ("Live Loop:", 3, ["Off", "Replace ?", "Overdub ?"], "liveloop"), seen.get(0x17C))
+c.check("Live Loop list: 0x17c 'Live Loop:' Off / Replace / Overdub / Hold, xml 'liveloop'",
+        seen.get(0x17C) == ("Live Loop:", 4, ["Off", "Replace ?", "Overdub ?", "Hold ?"], "liveloop"), seen.get(0x17C))
 
 # --- memory: one block for all loops, only while 3 MB stay free for the firmware
 e.call("looper_boot")

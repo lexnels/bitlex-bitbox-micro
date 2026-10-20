@@ -7,6 +7,7 @@
  * captured during one pass is what the pad plays during the next one:
  *   Replace  each pass replaces the loop: the pad always plays the last bar(s) you played into it.
  *   Overdub  each pass adds to the loop.
+ *   Hold     recording stops; the pad keeps playing the loop as it is (Off goes back to the sample).
  * Playback never stops for recording; the loop is written just behind the point the pad is playing.
  *
  * How it plays: the pad's voice (started as usual: tap, MIDI, sequence) plays the loop instead of its sample, through
@@ -78,6 +79,7 @@ static const char *const status_text[] = {"?", "tempo", "mem", "full", "len", "p
 #define NAMES  ((const char **)(MOD_RAM + 0x3800u))   /* Off, Replace .., Overdub .. */
 #define NAME_R ((char *)(MOD_RAM + 0x3840u))   /* 32 bytes each */
 #define NAME_O ((char *)(MOD_RAM + 0x3860u))
+#define NAME_H ((char *)(MOD_RAM + 0x3a00u))
 #define STATUS (*(volatile uint8_t *)(MOD_RAM + 0x3830u))
 #define SEEN_ID    (*(volatile uint32_t *)(MOD_RAM + 0x3838u))   /* pad id (+0x18) of the last active voice rendered */
 #define WANT_PAD   (*(volatile uint8_t *)(MOD_RAM + 0x383cu))    /* the Live Loop pad the status is about */
@@ -109,7 +111,7 @@ static void pad_text(char *t)
 
 static void status_show(unsigned st)
 {
-    if (st == STATUS && st != ST_PAD && NAMES[1] == NAME_R)
+    if (st == STATUS && st != ST_PAD && NAMES[1] == NAME_R && NAMES[3] == NAME_H)
         return;
     STATUS = (uint8_t)st;
     char t[16];
@@ -120,9 +122,11 @@ static void status_show(unsigned st)
     }
     name_set(NAME_R, "Replace", txt);
     name_set(NAME_O, "Overdub", txt);
+    name_set(NAME_H, "Hold", st == ST_REC || st == ST_REC_T ? "PLAY" : txt);
     NAMES[0] = "Off";
     NAMES[1] = NAME_R;
     NAMES[2] = NAME_O;
+    NAMES[3] = NAME_H;
 }
 
 struct slot {
@@ -363,7 +367,7 @@ void looper_block(uint8_t *ctx, int n)
         const void *store = store_of(p);
         int mode = store_live(store) ? fw_store_get(store, P_LIVELOOP) : 0;
         int si = LP->pad_slot[p];
-        if (mode < 1 || mode > 2) {
+        if (mode < 1 || mode > 3) {
             if (si >= 0) {
                 LP->slot[si].pad = -1;
                 LP->pad_slot[p] = -1;
@@ -466,6 +470,9 @@ void looper_block(uint8_t *ctx, int n)
                 if (mode == 2) {
                     x = soft_limit(x + ol[i] * OVERDUB_KEEP);
                     y = soft_limit(y + or_[i] * OVERDUB_KEEP);
+                } else if (mode == 3) {             /* Hold: the loop keeps what it plays */
+                    x = ol[i];
+                    y = or_[i];
                 }
                 bl[i] = to16(x);
                 br[i] = to16(y);
@@ -653,5 +660,5 @@ void looper_register(void *table)
 {
     STATUS = 0xff;
     status_show(ST_NONE);
-    fw_register_list(table, P_LIVELOOP, "Live Loop:", NAMES, 3, "liveloop");
+    fw_register_list(table, P_LIVELOOP, "Live Loop:", NAMES, 4, "liveloop");
 }
