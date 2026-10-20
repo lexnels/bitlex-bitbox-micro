@@ -42,7 +42,7 @@ as **2.3.4-L2**.
   - **Shape** (0-100 %, default 50 %): the grain envelope. 0 % is plucky (no attack, short release), 50 % the stock
     smooth window, 100 % a swell (long attack, no decay); it morphs in between.
   - **Grain Sync** (Free / Beat, default Free): Free is stock (grains follow Density). Beat starts each new grain on the
-    next step of the **Sync Rate** grid (1/64, 1/32, 1/16, 1/8, 1/4, 1/2, 1, 2 or 4 bars, default 1/16), locked to the
+    next step of the **Sync Rate** grid (1/64 to 1 bar, each straight, triplet (T) or dotted (D), then 2 or 4 bars; default 1/16), locked to the
     song position, one grain per step. How many steps get a grain depends on Grain Count and Grain Size: a slot only
     takes a new step once its grain has finished.
   - **Position** (0-100 %, default 0 %): where the window starts in the sample. It's added to the stock read position,

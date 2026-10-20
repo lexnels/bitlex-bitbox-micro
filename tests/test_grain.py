@@ -61,13 +61,14 @@ e.stub(0x08069E7C, lambda: seen.setdefault(e.arg(1), ("list", e.cstr(e.arg(2)),
 e.call("grain_register", 0x24001000)
 c.check("registers Shape (0x17d), Grain Sync Free/Beat (0x17e), Sync Rate 1/64 .. 4 bars (0x17f), Position (0x180)",
         seen.get(0x17D) == ("num", "Shape:") and seen.get(0x17E) == ("list", "Grain Sync:", ["Free", "Beat"])
-        and seen.get(0x17F) == ("list", "Sync Rate:", ["1/64", "1/32", "1/16", "1/8", "1/4", "1/2", "1 bar",
-                                                       "2 bars", "4 bars"])
+        and seen.get(0x17F) == ("list", "Sync Rate:", [f"{d}{k}" for d in ("1/64", "1/32", "1/16", "1/8", "1/4", "1/2")
+                                                       for k in ("T", "", "D")] + ["1 bar T", "1 bar", "1 bar D",
+                                                                                   "2 bars", "4 bars"])
         and seen.get(0x180) == ("num", "Position:"), seen)
 added = []
 e.stub(0x0808951E, lambda: added.append((e.arg(1), e.arg(2))))
 e.call("grain_pad_store", 0x24002000)
-c.check("pad store defaults: Shape 50 %, Free, 1/16, Position 0", added == [(0x17D, 500), (0x17E, 0), (0x17F, 2),
+c.check("pad store defaults: Shape 50 %, Free, 1/16, Position 0", added == [(0x17D, 500), (0x17E, 0), (0x17F, 7),
                                                                         (0x180, 0)], added)
 table = struct.unpack("<8192f", e.rd(0x38008000, 4 * 8192))
 c.check("at boot the window table is the stock Hann window", table == STOCK)
@@ -186,16 +187,22 @@ def spawn_with(delay):
 
 transport(48000 * 3 + 100)                            # 120 BPM: 1/16 = 6000 frames; song at 144100
 e.call("grain_clock", TR, N)
-pad_store(1, 2, sync=0, rate=2)
+pad_store(1, 2, sync=0, rate=7)
 c.check("Grain Sync Free: the stock start stays", spawn_with(700) == 700)
-pad_store(1, 2, sync=1, rate=2)
+pad_store(1, 2, sync=1, rate=7)
 d1 = spawn_with(700)                                  # wants 144800: next 1/16 step is 150000
 d2 = spawn_with(50)                                   # wants 144150, step 150000 is taken: 156000
 c.check("Grain Sync Beat 1/16: starts on the next step (150000 - 144100 = 5900 frames)", d1 == 5900, d1)
 c.check("Grain Sync Beat: one grain per step, the next grain takes the following step (11900)", d2 == 11900, d2)
-pad_store(1, 2, sync=1, rate=6)                       # 1 bar = 96000
+pad_store(1, 2, sync=1, rate=19)                      # 1 bar = 96000
 d3 = spawn_with(0)
 c.check("Sync Rate 1 bar: the next bar line (192000 - 144100)", d3 == 192000 - 144100, d3)
+pad_store(1, 2, sync=1, rate=6)                       # 1/16 triplet = 4000: after 192000 comes 196000
+d4 = spawn_with(0)
+pad_store(1, 2, sync=1, rate=11)                      # 1/8 dotted = 18000: after 196000 comes 198000
+d5 = spawn_with(0)
+c.check("Sync Rate 1/16T (4000 frames) and 1/8D (18000 frames) grids", (d4, d5) == (196000 - 144100, 198000 - 144100),
+        (d4, d5))
 transport(48000 * 3 + 100 + N)                        # transport ran on one block
 e.call("grain_clock", TR, N)
 transport(48000 * 3 + 100 + N)                        # stalled for a block

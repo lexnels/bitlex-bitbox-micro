@@ -4,7 +4,7 @@
  *   Shape     the grain envelope, 0..100 %: 0 plucky (no attack, short release), 50 the stock smooth (Hann) window,
  *             100 a swell (long attack, no decay); in between it morphs.
  *   Grain Sync Free (stock: grains follow Density) or Beat: each new grain starts on the next free step of the Sync
- *             Rate grid (1/64 .. 4 bars, default 1/16), locked to the song position, one grain per step.
+ *             Rate grid (1/64 .. 4 bars, straight, triplet or dotted; default 1/16), locked to the song position, one grain per step.
  *   Position  where the window starts in the sample, 0..100 %: added to the stock read position (which moves with
  *             Speed) and wraps around the sample.
  *
@@ -36,8 +36,22 @@
 #define LAST_AT   ((volatile double *)(MOD_RAM + 0x3900u))       /* per pad: song time of its last grid grain, -1 */
 
 static const char *const sync_names[2] = {"Free", "Beat"};
-static const char *const rate_names[9] = {"1/64", "1/32", "1/16", "1/8", "1/4", "1/2", "1 bar", "2 bars", "4 bars"};
-static const float rate_quarters[9] = {0.0625f, 0.125f, 0.25f, 0.5f, 1, 2, 4, 8, 16};
+/* Each division as a triplet (2/3), straight and dotted (3/2), from 1/64 to 1 bar, then 2 and 4 bars */
+#define RATES     23
+#define RATE_1_16 7
+static const char *const rate_names[RATES] = {
+    "1/64T", "1/64", "1/64D", "1/32T", "1/32", "1/32D", "1/16T", "1/16", "1/16D", "1/8T", "1/8", "1/8D",
+    "1/4T", "1/4", "1/4D", "1/2T", "1/2", "1/2D", "1 bar T", "1 bar", "1 bar D", "2 bars", "4 bars"};
+
+static float rate_quarters(unsigned i)
+{
+    if (i >= RATES)
+        i = RATE_1_16;
+    if (i >= 21)
+        return i == 21 ? 8.0f : 16.0f;
+    static const float kind[3] = {2.0f / 3.0f, 1.0f, 1.5f};
+    return 0.0625f * (float)(1u << (i / 3)) * kind[i % 3];
+}
 
 /* A pad's setting, or `def` when its store has none (presets from before the mod, other pad types). */
 static int setting(const uint8_t *pad, unsigned id, int def)
@@ -147,8 +161,7 @@ void grain_spawn(uint8_t *pad, void *now, uint8_t *voice, int a4, int a5, uint8_
     int p = pad_index(pad);
     if (p < 0)
         return;
-    unsigned ri = (unsigned)setting(pad, P_GRATE, 2);
-    float step = CLK_SPQ * rate_quarters[ri < 9 ? ri : 2];
+    float step = CLK_SPQ * rate_quarters((unsigned)setting(pad, P_GRATE, RATE_1_16));
     double song = CLK_SONG;
     int32_t d = *(int32_t *)(grain + 0x28);
     double at = song + (double)(d > 0 ? d : 0);
@@ -171,7 +184,7 @@ void grain_register(void *table)
     CLK_OK = 0;
     fw_register_num(table, P_GSHAPE, 8, "Shape:", 0, 1000, "grainshape");
     fw_register_list(table, P_GSYNC, "Grain Sync:", sync_names, 2, "grainsync");
-    fw_register_list(table, P_GRATE, "Sync Rate:", rate_names, 9, "grainrate");
+    fw_register_list(table, P_GRATE, "Sync Rate:", rate_names, RATES, "grainrate");
     fw_register_num(table, P_GPOS, 8, "Position:", 0, 1000, "grainpos");
 }
 
@@ -179,6 +192,6 @@ void grain_pad_store(void *store)
 {
     fw_store_add(store, P_GSHAPE, 500);
     fw_store_add(store, P_GSYNC, 0);
-    fw_store_add(store, P_GRATE, 2);
+    fw_store_add(store, P_GRATE, RATE_1_16);
     fw_store_add(store, P_GPOS, 0);
 }
