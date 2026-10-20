@@ -174,7 +174,23 @@ void grain_spawn(uint8_t *pad, void *now, uint8_t *voice, int a4, int a5, uint8_
         t = ((double)(int32_t)(last / (double)step + 1e-6) + 1.0) * (double)step;   /* one grain per step */
     LAST_AT[p] = t;
     double wait = t - song;
-    *(int32_t *)(grain + 0x28) = wait > 0.0 ? (int32_t)(wait + 0.5) : 0;
+    int32_t w = wait > 0.0 ? (int32_t)(wait + 0.5) : 0;
+    *(int32_t *)(grain + 0x28) = w;
+    /*
+     * A grain whose stock start had already passed comes back part-played (progress + 0x30, its read position moved
+     * by as much); on the grid it starts whole. And the stock spawn times the next grains from voice + 0x530 (about the
+     * middle of the last grain), which the grid's waits would leave further and further behind until every grain came
+     * back fully played and silent: it follows this grain's middle instead.
+     */
+    int32_t done = *(int32_t *)(grain + 0x30);
+    if (done > 0) {
+        int64_t pos = *(int64_t *)(grain + 8) + (voice[0x24] ? -(int64_t)done : (int64_t)done);
+        *(int64_t *)(grain + 8) = pos < 0 ? 0 : pos;
+        *(int32_t *)(grain + 0x30) = 0;
+        *(int32_t *)(grain + 0x2c) = *(int32_t *)(grain + 0x34);
+    }
+    if (now)
+        *(int64_t *)(voice + 0x530) = *(const int64_t *)now + w + *(int32_t *)(grain + 0x34) / 2;
 }
 
 void grain_register(void *table)

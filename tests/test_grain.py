@@ -167,8 +167,14 @@ spawned = []
 
 def spawn():
     grain = e.arg(5)
+    d = spawned.pop(0)
+    done, pos = (d[1], d[2]) if isinstance(d, tuple) else (0, 5000)
     e.w8(grain, 1)
-    e.w32(grain + 0x28, spawned.pop(0))
+    e.w32(grain + 0x28, d[0] if isinstance(d, tuple) else d)
+    e.wr(grain + 8, struct.pack("<q", pos))
+    e.w32(grain + 0x2C, 4096 - done)
+    e.w32(grain + 0x30, done)
+    e.w32(grain + 0x34, 4096)
     e.ret()
 
 
@@ -179,9 +185,13 @@ def transport(now, tempo=120.0):
     e.wr(TR, struct.pack("<qqqf", now, 0, 0, tempo))
 
 
+NOW = 0x24079000
+e.wr(NOW, struct.pack("<q", 1_000_000))
+
+
 def spawn_with(delay):
     spawned.append(delay)
-    e.call("grain_spawn", PAD, 0, VOICE, 0, 0, stack_args=(0, GRAIN))
+    e.call("grain_spawn", PAD, NOW, VOICE, 0, 0, stack_args=(0, GRAIN))
     return e.r32(GRAIN + 0x28)
 
 
@@ -203,6 +213,15 @@ pad_store(1, 2, sync=1, rate=11)                      # 1/8 dotted = 18000: afte
 d5 = spawn_with(0)
 c.check("Sync Rate 1/16T (4000 frames) and 1/8D (18000 frames) grids", (d4, d5) == (196000 - 144100, 198000 - 144100),
         (d4, d5))
+pad_store(1, 2, sync=1, rate=7)
+e.w8(VOICE + 0x24, 0)
+d6 = spawn_with((0, 3000, 20000 - 3000))              # stock: its start passed 3000 frames ago, comes back part-played
+g = struct.unpack("<q", e.rd(GRAIN + 8, 8)) + struct.unpack("<iii", e.rd(GRAIN + 0x2C, 12))
+v530 = struct.unpack("<q", e.rd(VOICE + 0x530, 8))[0]
+c.check("Grain Sync: a late grain starts whole on the grid (progress 0, all 4096 frames, read from its own start)",
+        g == (20000, 4096, 0, 4096), g)
+c.check("Grain Sync: the stock grain timeline follows the grid (voice + 0x530 = now + wait + half a grain)",
+        v530 == 1_000_000 + d6 + 2048, (v530, d6))
 transport(48000 * 3 + 100 + N)                        # transport ran on one block
 e.call("grain_clock", TR, N)
 transport(48000 * 3 + 100 + N)                        # stalled for a block
